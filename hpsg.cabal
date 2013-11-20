@@ -1,0 +1,29 @@
+name:               hpsg
+version:            0.1
+synopsis:           HPSG
+description:
+    TODO
+license:            BSD3
+license-file:       LICENSE
+cabal-version:      >= 1.6
+copyright:          Copyright (c) 2013 Jakub Waszczuk
+author:             Jakub Waszczuk
+maintainer:         waszczuk.kuba@gmail.com
+stability:          experimental
+category:           Natural Language Processing
+homepage:           https://github.com/kawu/hpsg
+build-type:         Simple
+
+library
+    hs-source-dirs: src
+    build-depends:
+        base            >= 4        && < 5
+
+    exposed-modules:
+        NLP.HPSG.FS
+
+    ghc-options: -Wall
+
+source-repository head
+    type: git
+    location: https://github.com/kawu/hpsg.git
