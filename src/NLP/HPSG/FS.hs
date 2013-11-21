@@ -123,7 +123,7 @@ data FV a
 
 
 ---------------------------------------------------------------------
--- Unification
+-- Simple (and wrong) unification
 ---------------------------------------------------------------------
 
 
@@ -140,6 +140,29 @@ unifyWrong s1 s2 = do
         else Nothing
     unifyFV (Sub x) (Sub y) = Sub <$> unifyWrong x y
     unifyFV _ _ = Nothing
+
+
+---------------------------------------------------------------------
+-- Notes on parsing and unification
+---------------------------------------------------------------------
+
+
+-- | The question: what unification capabilities are we going to
+-- need within the context of parsing?
+--
+-- The basic parsing step consists of matching a particular rule to a
+-- (contiguous?) sequence of "expressions" (words or phrases).  At this
+-- point we have to perform unification between right-hand side elements
+-- of the rule and corresponding expressions.  Constituents produced
+-- during the parsing stage are fully specified, so it seems that we
+-- don't even need to be able to perform unification between two
+-- variable-adorned feature structures: one of them will always be fully
+-- specified (i.e., without variables).
+--
+-- What we need to be able to do is to perform unification between
+-- a sequence of feature structures (possibly with internal references
+-- between individual components) and a sequence of fully-specified
+-- constituents.
 
 
 ---------------------------------------------------------------------
