@@ -163,6 +163,10 @@ unifyWrong s1 s2 = do
 -- a sequence of feature structures (possibly with internal references
 -- between individual components) and a sequence of fully-specified
 -- constituents.
+--
+-- Once the match is "assured", we have to rewrite values assigned
+-- to individual variables (determined during earlier steps), but
+-- it seems to be a simple task.
 
 
 ---------------------------------------------------------------------
