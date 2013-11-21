@@ -97,6 +97,11 @@ import qualified Data.Map as M
 ---------------------------------------------------------------------
 
 
+-- TODO: An alternative representation is also possible (and better,
+-- perhaps).  In named feature values we store variables *or* values,
+-- and a map which assignes values to variables is stored separately.
+
+
 -- | A feature structure, possibly with variables.  Traditionally,
 -- the feature type is represented separately and always has an atomic
 -- value, but there seems to be no point in enforcing this on the level
@@ -163,6 +168,10 @@ unifyWrong s1 s2 = do
 -- a sequence of feature structures (possibly with internal references
 -- between individual components) and a sequence of fully-specified
 -- constituents.
+--
+-- It can be also seen a little differently: first we match each
+-- (FS, constituent) pair separately, and only afterwards we perform
+-- unification between variables which occur in different FSs.
 --
 -- Once the match is "assured", we have to rewrite values assigned
 -- to individual variables (determined during earlier steps), but
