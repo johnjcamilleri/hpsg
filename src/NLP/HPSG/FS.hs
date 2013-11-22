@@ -5,15 +5,15 @@ module NLP.HPSG.FS
 (
 -- * Feature structure
   FS
-, FN (..)
+, BFS (..)
 , FV
 -- * Unification
-, unifyWrong
+-- , unifyWrong
 ) where
 
 
-import           Control.Applicative ((<$>))
-import           Data.Traversable (traverse)
+-- import           Control.Applicative ((<$>))
+-- import           Data.Traversable (traverse)
 import qualified Data.Map as M
 
 
@@ -97,27 +97,20 @@ import qualified Data.Map as M
 ---------------------------------------------------------------------
 
 
--- TODO: An alternative representation is also possible (and better,
--- perhaps).  In named feature values we store variables *or* values,
--- and a map which assignes values to variables is stored separately.
+-- | A feature structure with bound variables.
+data BFS a = BFS {
+    -- | Feature structure with free variables.
+      freeFS :: FS a
+    -- | A map from variable names to feature values.
+    , valMap :: M.Map a (FV a)
+    } deriving (Show, Eq, Ord)
 
 
 -- | A feature structure, possibly with variables.  Traditionally,
--- the feature type is represented separately and always has an atomic
--- value, but there seems to be no point in enforcing this on the level
--- of the type system.
-type FS a = M.Map a (FN a)
-
-
--- | A (posiblly named) feature value.
-data FN a = FN {
-    -- | A variable name (possibly)
-      varName   :: Maybe a
---     -- | A set of potential values
---     , valSet    :: S.Set (FV a)
-    -- | A feature value
-    , value     :: FV a
-    } deriving (Show, Eq, Ord)
+-- the feature type is represented separately and it has always
+-- an atomic value, but there seems to be no point in enforcing
+-- this on the level of the type system.
+type FS a = M.Map a (Either (FV a) a)
 
 
 -- | A feature value.
@@ -132,19 +125,19 @@ data FV a
 ---------------------------------------------------------------------
 
 
--- | Disregard variables and perform simplified unification of the
--- two given feature structures.
-unifyWrong :: Ord a => FS a -> FS a -> Maybe (FS a)
-unifyWrong s1 s2 = do
-    mut <- traverse id $ M.intersectionWith unifyFN s1 s2
-    return $ mut `M.union` s1 -|- s2
-  where
-    unifyFN (FN q x) (FN _ y) = FN q <$> unifyFV x y
-    unifyFV (Val x) (Val y) = if x == y
-        then Just $ Val x
-        else Nothing
-    unifyFV (Sub x) (Sub y) = Sub <$> unifyWrong x y
-    unifyFV _ _ = Nothing
+-- -- | Disregard variables and perform simplified unification of the
+-- -- two given feature structures.
+-- unifyWrong :: Ord a => FS a -> FS a -> Maybe (FS a)
+-- unifyWrong s1 s2 = do
+--     mut <- traverse id $ M.intersectionWith unifyFN s1 s2
+--     return $ mut `M.union` s1 -|- s2
+--   where
+--     unifyFN (FN q x) (FN _ y) = FN q <$> unifyFV x y
+--     unifyFV (Val x) (Val y) = if x == y
+--         then Just $ Val x
+--         else Nothing
+--     unifyFV (Sub x) (Sub y) = Sub <$> unifyWrong x y
+--     unifyFV _ _ = Nothing
 
 
 ---------------------------------------------------------------------
