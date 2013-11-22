@@ -98,12 +98,23 @@ import qualified Data.Map as M
 
 
 -- | A feature structure with bound variables.
+-- TODO: Do we assume, that every variable is bound, or (more
+-- naturally), that some of the variables are bound?
 data BFS a = BFS {
     -- | Feature structure with free variables.
       freeFS :: FS a
-    -- | A map from variable names to feature values.
+    -- | A map from variable names to feature values.  Be aware,
+    -- that values in the map may contain variable references as
+    -- well, thus introducing inter-dependencies between individual
+    -- variables.
     , valMap :: M.Map a (FV a)
     } deriving (Show, Eq, Ord)
+
+
+-- BUT: The feature values contained in the BFS structure can
+-- include variables as well!  What conditions must be satisfied
+-- by such a structure?  Do internal variables have to be assigned
+-- by BFS as well?  Yes, it seems the only reasonable solution.
 
 
 -- | A feature structure, possibly with variables.  Traditionally,
