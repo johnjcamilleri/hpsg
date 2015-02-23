@@ -6,7 +6,7 @@ module NLP.HPSG.FS
 -- * Feature structure
   FS
 , BFS (..)
-, FV
+, FV (..)
 -- * Unification
 -- , unifyWrong
 ) where
@@ -48,29 +48,29 @@ import qualified Data.Map as M
 --     -- Attribute names and value names can collide.
 --     , fsAtts    :: M.Map a (FVType a)
 --     } deriving (Show, Eq, Ord)
--- 
--- 
+--
+--
 -- -- | A feature value.
 -- data FVType a
 --     = Ptr a           -- ^ Pointer to another feature type
 --     | Dom (S.Set a)   -- ^ Set of possible values
--- 
--- 
+--
+--
 -- ---------------------------------------------------------------------
 -- -- Hierarchy of types defined in the book
 -- ---------------------------------------------------------------------
--- 
--- 
+--
+--
 -- -- | FS hierarchy smart constructor.
 -- mkFS :: a -> [(a, a)] -> [FSType a] -> Tree (FSType a)
 -- mkFS x ys = Node (FSType x $ M.fromList ys)
--- 
--- 
+--
+--
 -- -- | Domain smart constructor.
 -- dom :: [a] -> FVType a
 -- dom xs = FVType . S.fromList
--- 
--- 
+--
+--
 -- -- | Hierarchy of FS types.
 -- typHier :: Tree (FSType String)
 -- typHier = mkFS "feat-struc" []
