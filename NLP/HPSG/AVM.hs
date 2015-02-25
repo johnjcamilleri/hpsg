@@ -47,6 +47,14 @@ attrMap = M.fromList . attrList
 mkAV :: [(String,Value)] -> AV
 mkAV = attrMap
 
+vmkAV = ValAV . mkAV
+
+-- | Make an AV with a single attribute
+mkAV1 :: String -> Value -> AV
+mkAV1 a v = mkAV [(a,v)]
+
+vmkAV1 a v = ValAV $ mkAV1 a v
+
 -- | Make an AVM with no name
 mkAVM :: [(String,Value)] -> AVM
 mkAVM l = AVM (attrMap l) M.empty
