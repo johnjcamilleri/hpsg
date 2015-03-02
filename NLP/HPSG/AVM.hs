@@ -35,7 +35,6 @@ data AVM = AVM {
 
 -- | A map of attribute-values
 type AV = M.Map Attribute Value
-  -- deriving (Eq, Ord, Show)
 
 attrList :: [(String,v)] -> [(Attribute,v)]
 attrList = map (\(a,v)->(Attr a,v))
@@ -66,26 +65,34 @@ mkAVM l = AVM (attrMap l) M.empty
 ppAVM :: AVM -> IO ()
 ppAVM avm = do
   go 0 (avmBody avm)
+  putStr "\n"
   if M.size (avmDict avm) > 0
   then do
     putStrLn "where"
-    mapM_ (\(i,av) -> putStrLn (show i++": ") >> go 0 av) (M.toList $ avmDict avm)
+    mapM_ (\(i,av) -> putStrLn (show i++": ") >> go 0 av >> putStr "\n") (M.toList $ avmDict avm)
   else return ()
   where
     go l av = do
-      case M.lookup (Attr "SORT") av of
-        Just (ValAtom s) -> putStrLn $ (replicate l ' ') ++ ("[" ++ s)
-        _ -> return ()
-      mapM_ (uncurry f) (M.toList av)
+      -- putStr $ replicate l ' '
+      putStr $ "["
+      -- case M.lookup (Attr "SORT") av of
+      --   Just (ValAtom s) -> putStrLn $ (replicate l ' ') ++ ("[" ++ s)
+      --   _ -> return ()
+      mapM_ (uncurry $ f (l+1)) $ zip [0..] (M.toList av)
       where
-        f (Attr a) v = do
-          putStr (replicate l ' ')
-          putStr $ "["++a++" "
+        f l' i ((Attr a),v) = do
+          if i > 0
+          then putStr $ replicate l' ' '
+          else return ()
+          putStr $ a++":"
           case v of
-            ValAV  av  -> putStr "\n" >> go (l+(length a)+1) av
-            ValAtom s  -> putStrLn $ s
-            ValList vs -> putStrLn $ "<"++replicate (length vs) '.'++">"
-            ValIndex i -> putStrLn $ show i
+            ValAV  av  -> go (l'+(length a)+1) av
+            ValAtom s  -> putStr $ s
+            ValList vs -> putStr $ "<"++replicate (length vs) '.'++">"
+            ValIndex i -> putStr $ show i
+          if i+1 == M.size av
+          then putStr "]"
+          else putStrLn " "
 
 (⊔) :: AVM -> AVM -> Maybe AVM
 (⊔) = unify
