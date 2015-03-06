@@ -3,6 +3,8 @@ module Main where
 
 -- import NLP.HPSG
 import NLP.HPSG.AVM
+import NLP.HPSG.Templates
+
 import qualified Data.Map as M
 import Data.Maybe
 
@@ -37,3 +39,25 @@ main = do
   let Just avm = _15
   ppAVM avm
 -- main = ppAVM _14
+
+{- Examples from: https://web.cs.dal.ca/~vlado/stefsexamples/04.html
+
+// Lexical entries
+[cat:[head:[noun]
+      subj:-     ]] -> sandy.   // Now "sandy" cannot have a subject
+
+[cat:[head:[verb]
+      subj:cat:head:[noun]]] -> snored.
+
+// Grammar rules
+[cat:head:[verb]] -> [cat:head:#Head] [cat:subj:cat:head:#Head].
+
+> parse "sandy snored"
+[top
+ cat: [top
+       head: [verb]]
+_from: 0
+  _to: 12
+_orth: 'sandy snored']
+
+-}

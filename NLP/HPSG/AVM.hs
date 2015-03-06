@@ -13,6 +13,7 @@ data Attribute = Attr String
 
 -- | Value of an attribute
 data Value = ValAV AV        -- ^ A sub-structure
+           -- | ValAVM AVM      -- ^ A sub-structure (possibly with a dictionary - should always be factored out)
            | ValAtom Sort    -- ^ Atomic value
            | ValList [Value] -- ^ List of values
            | ValIndex Index  -- ^ Index to structure in dict
@@ -104,11 +105,15 @@ unify a1 a2 = Just $ AVM body' dict'
     dict = M.unionWithKey (\k _ -> error $ "Conflicting key: "++show k) (avmDict a1) (avmDict a2)
     (body',dict') = CMS.runState s (dict)
 
+    is_empty x = x == M.empty
+
     s :: CMS.State (M.Map Index AV) AV
     s = unionWithM f (avmBody a1) (avmBody a2)
 
     f :: Value -> Value -> CMS.State (M.Map Index AV) Value
     f (ValAV av1) (ValAV av2) = unionWithM f av1 av2 >>= \av -> return $ ValAV av
+    f (ValAV av1) v2 | is_empty av1 = return v2
+    f v1 (ValAV av2) | is_empty av2 = return v1
     f (ValAtom a1) (ValAtom a2) | a1 == a2  = return $ ValAtom a1
                                 | otherwise = error $ printf "Cannot unify: %s and %s" a1 a2
     f (ValList l1) (ValList l2) = return $ ValList (l1++l2)
