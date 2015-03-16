@@ -5,6 +5,7 @@ module NLP.HPSG.AVM where
 
 import qualified Data.Map as M
 import qualified Control.Monad.State as CMS
+import qualified Control.Monad.Writer as CMW
 import qualified Control.Monad.Except as CME
 import Data.Maybe
 import Text.Printf (printf)
@@ -94,50 +95,53 @@ vmkAVM = ValAVM . mkAVM
 ------------------------------------------------------------------------------
 -- Pretty print
 
-showValue :: Value -> String
-showValue v = case v of
-  ValAVM avm ->
-    if M.size (avmDict avm) > 0
-    then error "Non-empty middle dictionary"
-    else "[...]" -- TODO
-  ValAtom s  -> s
-  ValList vs -> "<"++replicate (length vs) '.'++">"
-  ValIndex i -> show i
-  ValNull -> "[]"
+showValue :: (CMW.MonadWriter String m) => Value -> (AVM -> m ()) -> m ()
+showValue v f =
+  case v of
+    ValAVM avm ->
+      if M.size (avmDict avm) > 0
+      then error "Non-empty middle dictionary"
+      else f avm
+    ValAtom s  -> CMW.tell s
+    ValList vs -> CMW.tell $ "<"++replicate (length vs) '.'++">"
+    ValIndex i -> CMW.tell $ show i
+    ValNull    -> CMW.tell "[]"
 
-ppAVM :: AVM -> IO ()
-ppAVM avm = do
-  go 0 (avmBody avm)
-  putStr "\n"
-  if M.size (avmDict avm) > 0
-  then do
-    putStrLn "where"
-    mapM_ (\(i,val) -> putStrLn $ show i ++ ": " ++ showValue val ++ "\n") (M.toList $ avmDict avm)
-  else return ()
+ppAVM :: AVM -> String
+ppAVM avm = CMW.execWriter f
   where
-    go :: Int -> AVMap -> IO ()
+    putStr s   = CMW.tell s
+    putStrLn s = CMW.tell (s++"\n")
+
+    f :: (CMW.MonadWriter String m) => m ()
+    f = do
+      go 0 (avmBody avm)
+      CMW.tell "\n"
+      if M.size (avmDict avm) > 0
+      then do
+        putStrLn "where"
+        mapM_ (\(i,val) -> do
+                               putStrLn $ show i ++ ". "
+                               showValue val (CMW.tell . ppAVM)
+                               putStr "\n"
+              ) (M.toList $ avmDict avm)
+      else return ()
+
+    go :: (CMW.MonadWriter String m) => Int -> AVMap -> m ()
     go l av = do
-      -- putStr $ replicate l ' '
       putStr $ "["
       -- case M.lookup (Attr "SORT") (avmBody avm) of
       --   Just (ValAtom s) -> putStrLn $ (replicate l ' ') ++ ("[" ++ s)
       --   _ -> return ()
       mapM_ (uncurry $ f (l+1)) $ zip [0..] (M.toList av)
       where
-        f l' i ((Attr a),v) = do
+        f :: (CMW.MonadWriter String m) => Int -> Int -> (Attribute,Value) -> m ()
+        f l' i (Attr a,v) = do
           if i > 0
           then putStr $ replicate l' ' '
           else return ()
           putStr $ a++":"
-          case v of
-            ValAVM avm ->
-              if M.size (avmDict avm) > 0
-              then error "Non-empty middle dictionary"
-              else go (l'+(length a)+1) (avmBody avm)
-            ValAtom s  -> putStr $ s
-            ValList vs -> putStr $ "<"++replicate (length vs) '.'++">"
-            ValIndex i -> putStr $ show i
-            ValNull    -> putStr "[]"
+          showValue v (\avm -> go (l'+(length a)+1) (avmBody avm))
           if i+1 == M.size av
           then putStr "]"
           else putStrLn " "
@@ -182,14 +186,22 @@ unify a1 a2 = do
                                 | otherwise = CME.throwError $ printf "Cannot unify: %s and %s" a1 a2
     f (ValList l1) (ValList l2) = return $ ValList (l1++l2)
     f (ValIndex i1) v2 = do
-      v1 <- CMS.gets (\m -> m M.! i1)
-      ValAVM v1' <- f v1 v2
-      -- CMS.modify (M.insert i1 v1')
+      mv1 <- CMS.gets (M.lookup i1)
+      case mv1 of
+        Just v1 -> do
+          v1' <- f v1 v2
+          CMS.modify (M.insert i1 v1')
+        Nothing ->
+          CMS.modify (M.insert i1 v2)
       return $ ValIndex i1
     f v1 (ValIndex i2) = do
-      v2 <- CMS.gets (\m -> m M.! i2)
-      ValAVM v2' <- f v1 v2
-    --   CMS.modify (M.insert i2 v2')
+      mv2 <- CMS.gets (M.lookup i2)
+      case mv2 of
+        Just v2 -> do
+          v2' <- f v1 v2
+          CMS.modify (M.insert i2 v2')
+        Nothing ->
+          CMS.modify (M.insert i2 v1)
       return $ ValIndex i2
     f ValNull v2 = return v2
     f v1 ValNull = return v1

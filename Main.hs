@@ -42,18 +42,42 @@ pl = mkAVM [("NUMBER",ValAtom "pl")]
 nonum = mkAVM [("NUMBER",ValNull)]
 p3 = mkAVM [("PERSON",ValAtom "p3")]
 
+num_sg_per_p3 = vmkAVM [("NUMBER",ValAtom "sg"),("PERSON",ValAtom "p3")]
+num_pl_per_p3 = vmkAVM [("NUMBER",ValAtom "pl"),("PERSON",ValAtom "p3")]
+
 eg1a = mkAVM'
-      [ ("AGREEMENT",ValIndex 1)
-      , ("SUBJECT"  ,vmkAVM [("AGREEMENT",ValIndex 1)]) ]
-      [ (1, vmkAVM [("AGREEMENT", ValAtom "hi")]) ]
-eg1b = mkAVM1 "SUBJECT" $ vmkAVM1 "AGREEMENT" $ vmkAVM [("PERSON",ValAtom "p3"),("NUMBER",ValAtom "sg")]
+       [ ("AGREEMENT",ValIndex 1)
+       , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" (ValIndex 1)) ]
+       [ (1, num_sg_per_p3) ]
+eg1b = mkAVM1 "SUBJECT" $ vmkAVM1 "AGREEMENT" num_sg_per_p3
+
+eg2a = mkAVM
+       [ ("AGREEMENT",ValIndex 1)
+       , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" (ValIndex 1)) ]
+eg2b = mkAVM1 "SUBJECT" $ vmkAVM1 "AGREEMENT" num_sg_per_p3
+
+eg3a = mkAVM'
+       [ ("AGREEMENT",ValIndex 1)
+       , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" (ValIndex 1)) ]
+       [ (1, num_sg_per_p3) ]
+eg3b = mkAVM
+       [ ("AGREEMENT",num_sg_per_p3)
+       , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" num_pl_per_p3) ]
+
+eg4a = mkAVM
+       [ ("AGREEMENT",vmkAVM1 "NUMBER" (ValAtom "sg"))
+       , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" (vmkAVM1 "NUMBER" (ValAtom "sg"))) ]
+eg4b = mkAVM1 "SUBJECT" (vmkAVM1 "AGREEMENT" num_sg_per_p3)
 
 main = do
-  -- ppAVM (sg & sg)
-  -- ppAVM (sg & pl)
-  -- ppAVM (sg & nonum)
-  -- ppAVM (sg & p3)
-  ppAVM (eg1a & eg1b)
+  -- putStrLn $ ppAVM (sg & sg)
+  -- putStrLn $ ppAVM (sg & pl) -- fails
+  -- putStrLn $ ppAVM (sg & nonum)
+  -- putStrLn $ ppAVM (sg & p3)
+  -- putStrLn $ ppAVM (eg1a & eg1b)
+  -- putStrLn $ ppAVM (eg2a & eg2b)
+  -- putStrLn $ ppAVM (eg3a & eg3b) -- fails
+  putStrLn $ ppAVM (eg4a & eg4b)
 
 ------------------------------------------------------------------------------
 -- Examples from: https://web.cs.dal.ca/~vlado/stefsexamples/04.html
