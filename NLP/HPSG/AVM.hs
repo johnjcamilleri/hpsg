@@ -4,11 +4,13 @@
 module NLP.HPSG.AVM where
 
 import qualified Data.Map as M
+import Data.List (nub)
+import Data.Maybe
+import Text.Printf (printf)
+
 import qualified Control.Monad.State as CMS
 import qualified Control.Monad.Writer as CMW
 import qualified Control.Monad.Except as CME
-import Data.Maybe
-import Text.Printf (printf)
 
 import qualified Data.Traversable as Tr
 
@@ -49,6 +51,34 @@ type AVMap = M.Map Attribute Value
 type Dict = M.Map Index Value
 
 ------------------------------------------------------------------------------
+-- Helpers
+
+-- | Is a value an index? Useful as a filter function
+isIndex :: Value -> Bool
+isIndex v = case v of
+  ValIndex _ -> True
+  _ -> False
+
+-- | Get indices in the AVM body
+getIndices :: AVM -> [Index]
+getIndices avm = nub $ CMW.execWriter (f avm)
+  where
+    f :: AVM -> CMW.Writer [Index] ()
+    f avm = mapM_ g (M.elems (avmBody avm))
+    g :: Value -> CMW.Writer [Index] ()
+    g v = case v of
+      ValAVM avm -> f avm
+      ValList vs -> mapM_ g vs
+      ValIndex i -> CMW.tell [i]
+      _ -> return ()
+
+-- | Are two AVM's dictionaries distinct?
+--   Helpful in test case generation
+distinctDicts :: AVM -> AVM -> Bool
+distinctDicts a b =
+  M.intersection (avmDict a) (avmDict b) == M.empty
+
+------------------------------------------------------------------------------
 -- Builders
 
 type AVList = [(String,Value)]
@@ -58,6 +88,8 @@ attrList = map (\(a,v)->(Attr a,v))
 
 attrMap :: [(String,v)] -> M.Map Attribute v
 attrMap = M.fromList . attrList
+
+nullAVM = mkAVM []
 
 -- -- | Make an AV map
 -- mkAV :: AVList -> AVMap
@@ -148,15 +180,33 @@ ppAVM avm = CMW.execWriter f
 ------------------------------------------------------------------------------
 -- Identity
 
-(~=) = typeIdentity
+-- | Type Identity: checks values are same (including variables)
+--   Often written =
+typeIdentity :: Value -> Value -> Bool
+typeIdentity a b = a == b
 
-tokenIdentity :: AVM -> AVM -> Bool
-tokenIdentity a b = a == b
+-- | Token Identity: checks things point to the same object
+--   Basically only true when variables have same value
+--   Often written ≐
+tokenIdentity :: Value -> Value -> Bool
+tokenIdentity (ValIndex i1) (ValIndex i2) | i1 == i2 = True
+tokenIdentity _ _ = False
 
-(.=) = typeIdentity
+-- | Equality that follows reentrants
+(~=) = eq
+infix 4 ~= -- same as ==
 
-typeIdentity :: AVM -> AVM -> Bool
-typeIdentity a b = undefined
+eq a b | (M.keys (avmBody a)) /= (M.keys (avmBody b)) = False
+eq a b =
+  all (\k -> M.member k b2 && eqV (b1 M.! k) (b2 M.! k)) (M.keys b1)
+  where
+    (b1,d1) = (avmBody a, avmDict a)
+    (b2,d2) = (avmBody b, avmDict b)
+
+    eqV :: Value -> Value -> Bool
+    eqV (ValIndex i1) v2 | M.member i1 d1 = eqV (d1 M.! i1) v2
+    eqV v1 (ValIndex i2) | M.member i2 d2 = eqV v1 (d2 M.! i2)
+    eqV v1 v2 = v1 == v2
 
 ------------------------------------------------------------------------------
 -- Unification
@@ -181,57 +231,55 @@ infix 4 &? -- same as <
 -- | Unification, with helpful error messages
 unify :: AVM -> AVM -> Either String AVM
 unify a1 a2 = do
-  let dict = dictMerge (avmDict a1) (avmDict a2)
-  (body', dict') <- CMS.runStateT (s a1 a2) dict
-  return $ AVM body' dict'
+  (body, (d1, d2)) <- CMS.runStateT (s a1 a2) (avmDict a1, avmDict a2)
+  return $ AVM body (dictMerge d1 d2)
 
   where
-    s :: (CME.MonadError String m, CMS.MonadState Dict m) => AVM -> AVM -> m AVMap
+    s :: (CME.MonadError String m, CMS.MonadState (Dict,Dict) m) => AVM -> AVM -> m AVMap
     s a1 a2 = unionWithM f (avmBody a1) (avmBody a2)
 
-    f :: (CME.MonadError String m, CMS.MonadState Dict m) => Value -> Value -> m Value
-    f v1 v2 | v1 == v2 = return v1
-    f (ValAVM av1) (ValAVM av2) = do
-      addToDict (avmDict av1)
-      addToDict (avmDict av2)
-      avmap <- unionWithM f (avmBody av1) (avmBody av2)
-      return $ ValAVM $ AVM avmap M.empty
-    f (ValAVM av1) v2 | is_empty av1 = return v2
-    f v1 (ValAVM av2) | is_empty av2 = return v1
-    f (ValAtom a1) (ValAtom a2) | a1 == a2  = return $ ValAtom a1
-                                | otherwise = CME.throwError $ printf "Cannot unify: %s and %s" a1 a2
-    f (ValList l1) (ValList l2) = return $ ValList (l1++l2)
+    f :: (CME.MonadError String m, CMS.MonadState (Dict,Dict) m) => Value -> Value -> m Value
+
+    -- Consider indices first
+    -- TODO: this is still buggy
     f (ValIndex i1) v2 = do
-      mv1 <- CMS.gets (M.lookup i1)
+      (d1,d2) <- CMS.get
+      mv1 <- CMS.gets (\(d1,d2) -> M.lookup i1 d1)
       case mv1 of
         Just v1 -> do
           v1' <- f v1 v2
-          CMS.modify (M.insert i1 v1')
+          CMS.modify (\(d1,d2) -> (M.insert i1 v1' d1, d2))
         Nothing ->
-          CMS.modify (M.insert i1 v2)
+          CMS.modify (\(d1,d2) -> (M.insert i1 v2 d1, d2))
       return $ ValIndex i1
     f v1 (ValIndex i2) = do
-      mv2 <- CMS.gets (M.lookup i2)
+      mv2 <- CMS.gets (\(d1,d2) -> (M.lookup i2 d2))
       case mv2 of
         Just v2 -> do
           v2' <- f v1 v2
-          CMS.modify (M.insert i2 v2')
+          CMS.modify (\(d1,d2) -> (d1, M.insert i2 v2' d2))
         Nothing ->
-          CMS.modify (M.insert i2 v1)
+          CMS.modify (\(d1,d2) -> (d1, M.insert i2 v1 d2))
       return $ ValIndex i2
+
+    -- General equality
+    f v1 v2 | v1 == v2 = return v1
+    f (ValAVM av1) (ValAVM av2)
+      | (avmDict av1) /= M.empty = CME.throwError $ "Non-empty dictionary in value"
+      | (avmDict av2) /= M.empty = CME.throwError $ "Non-empty dictionary in value"
+      | otherwise = do avmap <- unionWithM f (avmBody av1) (avmBody av2)
+                       return $ ValAVM $ AVM avmap M.empty
+    f (ValAVM av1) v2 | (avmBody av1) == M.empty = return v2
+    f v1 (ValAVM av2) | (avmBody av2) == M.empty = return v1
+    f (ValAtom a1) (ValAtom a2) | a1 == a2  = return $ ValAtom a1
+                                | otherwise = CME.throwError $ printf "Cannot unify: %s and %s" a1 a2
+    f (ValList l1) (ValList l2) = return $ ValList (l1++l2)
     f ValNull v2 = return v2
     f v1 ValNull = return v1
     f v1 v2 = CME.throwError $ printf "Cannot unify:\n  %s\n  %s" (show v1) (show v2)
 
-    addToDict :: (CME.MonadError String m, CMS.MonadState Dict m) => Dict -> m ()
-    addToDict dict = CMS.modify (dictMerge dict)
-
     dictMerge :: Dict -> Dict -> Dict
-    -- dictMerge = M.unionWithKey (\k _ -> error $ "Conflicting key: "++show k)
-    dictMerge = M.unionWithKey (\k v1 v2 -> v2) -- always choose first. probably dangerous?
-
-    is_empty :: AVM -> Bool
-    is_empty = (== M.empty) . avmBody
+    dictMerge = M.unionWithKey (\k _ -> error $ "Conflicting key: "++show k)
 
 -- See: http://stackoverflow.com/a/19896320/98600
 unionWithM :: (Monad m, Ord k) => (a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
@@ -241,11 +289,30 @@ unionWithM f mapA mapB =
 ------------------------------------------------------------------------------
 -- Subsumption
 
-(!<) :: AVM -> AVM -> Bool
-(!<) = subsumes
+-- | Are two AVMs comparable for subsumption ("subsumable")?
+subsumable :: AVM -> AVM -> Bool
+subsumable a b = a |< b || a |> b
+-- subsumable a b = a |< b || b |< a
 
-infix 4 !< -- same as <
+(|<) :: AVM -> AVM -> Bool
+(|<) = subsumes
+infix 4 |< -- same as <
+
+(|>) :: AVM -> AVM -> Bool
+(|>) = flip subsumes
+infix 4 |> -- same as >
 
 -- | AVMs may subsume eachother
+--   A subsumes B (A is more general than B)
+--   B is subsumed by A (B is more specific than A)
 subsumes :: AVM -> AVM -> Bool
-subsumes = undefined
+subsumes a b =
+  all (\k -> M.member k b2 && subV (b1 M.! k) (b2 M.! k)) (M.keys b1)
+  where
+    (b1,d1) = (avmBody a, avmDict a)
+    (b2,d2) = (avmBody b, avmDict b)
+
+    subV :: Value -> Value -> Bool
+    subV (ValIndex i1) v2 | M.member i1 d1 = subV (d1 M.! i1) v2
+    subV v1 (ValIndex i2) | M.member i2 d2 = subV v1 (d2 M.! i2)
+    subV v1 v2 = v1 == v2
