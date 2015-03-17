@@ -69,15 +69,25 @@ eg4a = mkAVM
        , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" (vmkAVM1 "NUMBER" (ValAtom "sg"))) ]
 eg4b = mkAVM1 "SUBJECT" (vmkAVM1 "AGREEMENT" num_sg_per_p3)
 
+suite :: IO ()
+suite = do
+  assert $ (sg & sg) == sg
+  assert $ not (sg &? pl)
+  assert $ sg & nonum == sg
+  assert $ (sg & p3) == AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}
+  assert $ (eg1a & eg1b) == AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1),(Attr "SUBJECT",ValAVM (AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1)], avmDict = M.fromList []}))], avmDict = M.fromList [(1,ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}))]}
+  assert $ (eg2a & eg2b) == AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1),(Attr "SUBJECT",ValAVM (AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1)], avmDict = M.fromList []}))], avmDict = M.fromList [(1,ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}))]}
+  assert $ not (eg3a &? eg3b)
+  assert $ (eg4a & eg4b) == AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg")], avmDict = M.fromList []})),(Attr "SUBJECT",ValAVM (AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}))], avmDict = M.fromList []}))], avmDict = M.fromList []}
+
+  where
+    assert True  = putStrLn "Ok"
+    assert False = error "Assertion failed"
+
+main :: IO ()
 main = do
-  -- putStrLn $ ppAVM (sg & sg)
-  -- putStrLn $ ppAVM (sg & pl) -- fails
-  -- putStrLn $ ppAVM (sg & nonum)
-  -- putStrLn $ ppAVM (sg & p3)
-  -- putStrLn $ ppAVM (eg1a & eg1b)
-  -- putStrLn $ ppAVM (eg2a & eg2b)
-  -- putStrLn $ ppAVM (eg3a & eg3b) -- fails
-  putStrLn $ ppAVM (eg4a & eg4b)
+  putStrLn $ show (sg & sg)
+  -- putStrLn $ show (sg & pl) -- fails
 
 ------------------------------------------------------------------------------
 -- Examples from: https://web.cs.dal.ca/~vlado/stefsexamples/04.html

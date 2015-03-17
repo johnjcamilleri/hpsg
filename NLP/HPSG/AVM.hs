@@ -20,8 +20,7 @@ data Attribute = Attr String
   deriving (Eq, Ord, Show)
 
 -- | Value of an attribute
-data Value = -- ValAV AV        -- ^ A sub-structure
-             ValAVM AVM      -- ^ A sub-structure (with its own dictionary - should always be factored up)
+data Value = ValAVM AVM      -- ^ A sub-structure (with its own dictionary - should always be factored up)
            | ValAtom Atom    -- ^ Atomic value
            | ValList [Value] -- ^ List of values
            | ValIndex Index  -- ^ Index to structure in dict
@@ -104,7 +103,7 @@ showValue v f =
       else f avm
     ValAtom s  -> CMW.tell s
     ValList vs -> CMW.tell $ "<"++replicate (length vs) '.'++">"
-    ValIndex i -> CMW.tell $ show i
+    ValIndex i -> CMW.tell $ "#"++show i
     ValNull    -> CMW.tell "[]"
 
 ppAVM :: AVM -> String
@@ -121,7 +120,7 @@ ppAVM avm = CMW.execWriter f
       then do
         putStrLn "where"
         mapM_ (\(i,val) -> do
-                               putStrLn $ show i ++ ". "
+                               putStr $ show i ++ " = "
                                showValue val (CMW.tell . ppAVM)
                                putStr "\n"
               ) (M.toList $ avmDict avm)
@@ -147,26 +146,42 @@ ppAVM avm = CMW.execWriter f
           else putStrLn " "
 
 ------------------------------------------------------------------------------
+-- Identity
+
+(~=) = typeIdentity
+
+tokenIdentity :: AVM -> AVM -> Bool
+tokenIdentity a b = a == b
+
+(.=) = typeIdentity
+
+typeIdentity :: AVM -> AVM -> Bool
+typeIdentity a b = undefined
+
+------------------------------------------------------------------------------
 -- Unification
 
--- | Unification.
+-- | Unification
 --   Throws an error if unification fails
 (&) :: AVM -> AVM -> AVM
 (&) a b = case unify a b of
   Left err -> error err
   Right avm -> avm
 
-addToDict :: (CME.MonadError String m, CMS.MonadState Dict m) => Dict -> m ()
-addToDict dict = CMS.modify (dictMerge dict)
+infixl 6 & -- same as +
 
-dictMerge :: Dict -> Dict -> Dict
-dictMerge = M.unionWithKey (\k _ -> error $ "Conflicting key: "++show k)
+-- | Unifiable
+(&?) :: AVM -> AVM -> Bool
+(&?) a b = case unify a b of
+  Left _ -> False
+  Right _ -> True
+
+infix 4 &? -- same as <
 
 -- | Unification, with helpful error messages
 unify :: AVM -> AVM -> Either String AVM
 unify a1 a2 = do
-  let
-    dict = dictMerge (avmDict a1) (avmDict a2)
+  let dict = dictMerge (avmDict a1) (avmDict a2)
   (body', dict') <- CMS.runStateT (s a1 a2) dict
   return $ AVM body' dict'
 
@@ -175,6 +190,7 @@ unify a1 a2 = do
     s a1 a2 = unionWithM f (avmBody a1) (avmBody a2)
 
     f :: (CME.MonadError String m, CMS.MonadState Dict m) => Value -> Value -> m Value
+    f v1 v2 | v1 == v2 = return v1
     f (ValAVM av1) (ValAVM av2) = do
       addToDict (avmDict av1)
       addToDict (avmDict av2)
@@ -207,6 +223,13 @@ unify a1 a2 = do
     f v1 ValNull = return v1
     f v1 v2 = CME.throwError $ printf "Cannot unify:\n  %s\n  %s" (show v1) (show v2)
 
+    addToDict :: (CME.MonadError String m, CMS.MonadState Dict m) => Dict -> m ()
+    addToDict dict = CMS.modify (dictMerge dict)
+
+    dictMerge :: Dict -> Dict -> Dict
+    -- dictMerge = M.unionWithKey (\k _ -> error $ "Conflicting key: "++show k)
+    dictMerge = M.unionWithKey (\k v1 v2 -> v2) -- always choose first. probably dangerous?
+
     is_empty :: AVM -> Bool
     is_empty = (== M.empty) . avmBody
 
@@ -218,6 +241,11 @@ unionWithM f mapA mapB =
 ------------------------------------------------------------------------------
 -- Subsumption
 
--- -- | AVMs may subsume eachother
--- subsumes :: AVM -> AVM -> Ordering
--- subsumes = undefined
+(!<) :: AVM -> AVM -> Bool
+(!<) = subsumes
+
+infix 4 !< -- same as <
+
+-- | AVMs may subsume eachother
+subsumes :: AVM -> AVM -> Bool
+subsumes = undefined
