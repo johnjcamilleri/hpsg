@@ -5,8 +5,8 @@ as defined by Carl Pollard, Ivan A. Sag in their 1994 book
 -}
 module NLP.HPSG
   (
-    -- * Feature structures
-    module NLP.HPSG.FS
+    -- * AVMs
+    module NLP.HPSG.AVM
   ) where
 
-import NLP.HPSG.FS
+import NLP.HPSG.AVM

@@ -1,6 +1,6 @@
 
 # HPSG - Head-Driven Phrase Structure Grammar
 
-An implementation of HPSG in Haskell.
+An implementation of AVMs and HPSG in Haskell.
 
-Forked from https://github.com/kawu/hpsg
+Originally forked from <https://github.com/kawu/hpsg> however there is no longer any code from that repo.

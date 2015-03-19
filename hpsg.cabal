@@ -1,12 +1,12 @@
 name:               hpsg
 version:            0.1
 synopsis:           HPSG: Head-Driven Phrase Structure Grammar
-description:        An implementation of Head-Driven Phrase Structure Grammar
-license:            BSD3
+description:        An implementation of attribute-value matrics and Head-Driven Phrase Structure Grammar
+license:            MIT
 license-file:       LICENSE
 cabal-version:      >= 1.6
-copyright:          Copyright (c) 2013 Jakub Waszczuk
-author:             Jakub Waszczuk, John J. Camilleri
+copyright:          Copyright (c) 2015 John J. Camilleri
+author:             John J. Camilleri
 maintainer:         john@johnjcamilleri.com
 stability:          experimental
 category:           Natural Language Processing
