@@ -4,9 +4,10 @@
 module NLP.HPSG.AVM where
 
 import qualified Data.Map as M
-import Data.List (nub)
+import qualified Data.List as L
 import Data.Maybe
 import Text.Printf (printf)
+import Debug.Trace (trace)
 
 import qualified Control.Monad.State as CMS
 import qualified Control.Monad.Writer as CMW
@@ -53,15 +54,32 @@ type Dict = M.Map Index Value
 ------------------------------------------------------------------------------
 -- Helpers
 
+-- | Lookup in AVM dictionary, as deep as necessary
+--   It is valid to have non-bound variables
+lookupAVM :: Index -> AVM -> Maybe Value
+lookupAVM i avm = lookupDict i (avmDict avm)
+
+-- | Lookup in AVM dictionary, as deep as necessary
+--   It is valid to have non-bound variables
+lookupDict :: Index -> Dict -> Maybe Value
+lookupDict i dict =
+  case M.lookup i dict of
+    Just (ValIndex j) -> lookupDict j dict
+    x -> x
+
 -- | Is a value an index? Useful as a filter function
 isIndex :: Value -> Bool
 isIndex v = case v of
   ValIndex _ -> True
   _ -> False
 
+-- | Get indices in the AVM dictionary
+getDictIndices :: AVM -> [Index]
+getDictIndices avm = M.keys (avmDict avm)
+
 -- | Get indices in the AVM body
 getIndices :: AVM -> [Index]
-getIndices avm = nub $ CMW.execWriter (f avm)
+getIndices avm = L.nub $ CMW.execWriter (f avm)
   where
     f :: AVM -> CMW.Writer [Index] ()
     f avm = mapM_ g (M.elems (avmBody avm))
@@ -78,6 +96,47 @@ distinctDicts :: AVM -> AVM -> Bool
 distinctDicts a b =
   M.intersection (avmDict a) (avmDict b) == M.empty
 
+-- | Do two AVM's use the same indices?
+--   Helpful in test case generation
+distinctIndices :: AVM -> AVM -> Bool
+distinctIndices a b =
+  L.intersect (getIndices a) (getIndices b) == []
+
+-- | Go over AVM and clear middle dictionaries.
+--   This involves pushing them up to the top level, possibly with renaming.
+cleanMiddleDicts :: AVM -> AVM
+cleanMiddleDicts avm = AVM b' d'
+  where
+    (b',d') = CMS.runState (s (avmBody avm)) (avmDict avm)
+    s :: (CMS.MonadState Dict m) => AVMap -> m AVMap
+    s = mapWithKeyM (const f)
+
+    f :: (CMS.MonadState Dict m) => Value -> m Value
+    f v@(ValAVM (AVM b d))
+      | M.null d  = return v
+      | otherwise = do
+          dict <- CMS.get
+          let is = [1..] L.\\ M.keys dict         -- available indices
+              rs = M.fromList $ zip (M.keys d) is -- map of replacements
+          CMS.modify (M.union (M.fromList [ (rs M.! k,v) | (k,v) <- M.toList d]))
+          let b' = replaceIndices rs b
+              newAVM = cleanMiddleDicts $ AVM b' M.empty
+          return $ ValAVM newAVM
+    f (ValList vs) = do
+      vs' <- mapM f vs
+      return $ ValList vs'
+    f v = return v
+
+replaceIndices :: M.Map Index Index -> AVMap -> AVMap
+replaceIndices rs = M.map f
+  where
+    f :: Value -> Value
+    f v = case v of
+      -- ValAVM avm -> ValAVM
+      ValIndex i -> ValIndex $ rs M.! i
+      ValList vs -> ValList $ map f vs
+      _ -> v
+
 ------------------------------------------------------------------------------
 -- Builders
 
@@ -89,15 +148,13 @@ attrList = map (\(a,v)->(Attr a,v))
 attrMap :: [(String,v)] -> M.Map Attribute v
 attrMap = M.fromList . attrList
 
+-- | The empty AVM
+nullAVM :: AVM
 nullAVM = mkAVM []
 
--- -- | Make an AV map
--- mkAV :: AVList -> AVMap
--- mkAV = attrMap
-
--- -- | Make an AV map as a value
--- vmkAV :: AVList -> Value
--- vmkAV = ValAVM . mkAVM
+-- | The empty AVM as a value
+vnullAVM :: Value
+vnullAVM = ValAVM nullAVM
 
 -- | Make an AVM with a single attribute
 mkAVM1 :: String -> Value -> AVM
@@ -107,17 +164,21 @@ mkAVM1 a v = mkAVM [(a,v)]
 vmkAVM1 :: String -> Value -> Value
 vmkAVM1 a v = ValAVM $ mkAVM1 a v
 
--- | Make an AVM with no name and empty dictionary
+-- | Make an AVM with an empty dictionary
 mkAVM :: AVList -> AVM
 mkAVM l = AVM (attrMap l) M.empty
 
--- | Make an AVM with no name and a dictionary
+-- | Make an AVM with a dictionary
 mkAVM' :: AVList -> [(Index,Value)] -> AVM
 mkAVM' l d = AVM (attrMap l) (M.fromList d)
 
 -- | Make an AVM as a Value
 vmkAVM :: AVList -> Value
 vmkAVM = ValAVM . mkAVM
+
+-- | Make an AVM with a dictionary as a Value
+vmkAVM' :: AVList -> [(Index,Value)] -> Value
+vmkAVM' l d = ValAVM $ mkAVM' l d
 
 -- -- | Make an AVM with a name
 -- mkAVMNamed :: Sort -> [(Attribute,Value)] -> AVM
@@ -134,7 +195,15 @@ showValue v f =
       then error "Non-empty middle dictionary"
       else f avm
     ValAtom s  -> CMW.tell s
-    ValList vs -> CMW.tell $ "<"++replicate (length vs) '.'++">"
+    ValList vs -> do
+      CMW.tell "<"
+      if null vs
+      then return ()
+      else do
+        let f avm = CMW.tell "."
+        showValue (head vs) f
+        mapM_ (\v -> CMW.tell "," >> showValue v f) (tail vs)
+      CMW.tell ">"
     ValIndex i -> CMW.tell $ "#"++show i
     ValNull    -> CMW.tell "[]"
 
@@ -231,36 +300,73 @@ infix 4 &? -- same as <
 -- | Unification, with helpful error messages
 unify :: AVM -> AVM -> Either String AVM
 unify a1 a2 = do
-  (body, (d1, d2)) <- CMS.runStateT (s a1 a2) (avmDict a1, avmDict a2)
-  return $ AVM body (dictMerge d1 d2)
+  -- if not (distinctIndices a2 a2)
+  -- then CME.throwError "I don't want to unify AVMs with intersecting indices"
+  -- else return nullAVM
+
+  dict <- dictMerge (avmDict a1) (avmDict a2)
+  (body, dict2) <- CMS.runStateT (s a1 a2) dict
+  return $ AVM body dict2
 
   where
-    s :: (CME.MonadError String m, CMS.MonadState (Dict,Dict) m) => AVM -> AVM -> m AVMap
+    s :: (CME.MonadError String m, CMS.MonadState Dict m) => AVM -> AVM -> m AVMap
     s a1 a2 = unionWithM f (avmBody a1) (avmBody a2)
 
-    f :: (CME.MonadError String m, CMS.MonadState (Dict,Dict) m) => Value -> Value -> m Value
+    f :: (CME.MonadError String m, CMS.MonadState Dict m) => Value -> Value -> m Value
 
     -- Consider indices first
     -- TODO: this is still buggy
+    f (ValIndex i1) (ValIndex i2) = do
+      mv1 <- CMS.gets (lookupDict i1)
+      mv2 <- CMS.gets (lookupDict i2)
+      case (mv1,mv2) of
+        (Just v1,Just v2) -> do
+          v' <- f v1 v2
+          CMS.modify (M.insert i1 v')
+          return $ ValIndex i1
+        (Just v1,Nothing) -> return $ ValIndex i1
+        (Nothing,Just v2) -> return $ ValIndex i2
+        (Nothing,Nothing) -> return $ ValIndex i1 -- is that right?
+
     f (ValIndex i1) v2 = do
-      (d1,d2) <- CMS.get
-      mv1 <- CMS.gets (\(d1,d2) -> M.lookup i1 d1)
+      mv1 <- CMS.gets (lookupDict i1)
       case mv1 of
         Just v1 -> do
           v1' <- f v1 v2
-          CMS.modify (\(d1,d2) -> (M.insert i1 v1' d1, d2))
+          CMS.modify (M.insert i1 v1')
         Nothing ->
-          CMS.modify (\(d1,d2) -> (M.insert i1 v2 d1, d2))
+          CMS.modify (M.insert i1 v2)
       return $ ValIndex i1
     f v1 (ValIndex i2) = do
-      mv2 <- CMS.gets (\(d1,d2) -> (M.lookup i2 d2))
+      mv2 <- CMS.gets (lookupDict i2)
       case mv2 of
         Just v2 -> do
           v2' <- f v1 v2
-          CMS.modify (\(d1,d2) -> (d1, M.insert i2 v2' d2))
+          CMS.modify (M.insert i2 v2')
         Nothing ->
-          CMS.modify (\(d1,d2) -> (d1, M.insert i2 v1 d2))
+          CMS.modify (M.insert i2 v1)
       return $ ValIndex i2
+    -- f (ValIndex i1) v2 = do
+    --   (d1,d2) <- CMS.get
+    --   mv1 <- CMS.gets (\(d1,d2) -> lookupDict i1 d1)
+    --   case mv1 of
+    --     Just v1 -> do
+    --       v1' <- f v1 v2
+    --       CMS.modify (\(d1,d2) -> (M.insert i1 v1' d1, d2))
+    --     Nothing ->
+    --       CMS.modify (\(d1,d2) -> (M.insert i1 v2 d1, d2))
+    --   -- CMS.get >>= \s -> trace (show s) (return ValNull)
+    --   return $ ValIndex i1
+    -- f v1 (ValIndex i2) = do
+    --   mv2 <- CMS.gets (\(d1,d2) -> lookupDict i2 d2)
+    --   case mv2 of
+    --     Just v2 -> do
+    --       v2' <- f v1 v2
+    --       CMS.modify (\(d1,d2) -> (d1, M.insert i2 v2' d2))
+    --     Nothing ->
+    --       CMS.modify (\(d1,d2) -> (d1, M.insert i2 v1 d2))
+    --   -- CMS.get >>= \s -> trace (show s) (return ValNull)
+    --   return $ ValIndex i2
 
     -- General equality
     f v1 v2 | v1 == v2 = return v1
@@ -271,20 +377,40 @@ unify a1 a2 = do
                        return $ ValAVM $ AVM avmap M.empty
     f (ValAVM av1) v2 | (avmBody av1) == M.empty = return v2
     f v1 (ValAVM av2) | (avmBody av2) == M.empty = return v1
-    f (ValAtom a1) (ValAtom a2) | a1 == a2  = return $ ValAtom a1
-                                | otherwise = CME.throwError $ printf "Cannot unify: %s and %s" a1 a2
-    f (ValList l1) (ValList l2) = return $ ValList (l1++l2)
+
+    -- Empty lists should be treated like nulls
+    -- f (ValList []) v2 = return v2
+    -- f v1 (ValList []) = return v1
+    -- Singleton lists should be treated like their head
+    -- f (ValList [v1']) (ValList [v2']) = f v1' v2'
+    -- f (ValList [v1']) v2 = f v1' v2
+    -- f v1 (ValList [v2']) = f v1 v2'
+    -- f (ValList l1) (ValList l2) = return $ ValList (l1++l2)
+
     f ValNull v2 = return v2
     f v1 ValNull = return v1
     f v1 v2 = CME.throwError $ printf "Cannot unify:\n  %s\n  %s" (show v1) (show v2)
 
-    dictMerge :: Dict -> Dict -> Dict
-    dictMerge = M.unionWithKey (\k _ -> error $ "Conflicting key: "++show k)
+    dictMerge :: (CME.MonadError String m) => Dict -> Dict -> m Dict
+    dictMerge = unionWithKeyM f
+      where
+        f :: (CME.MonadError String m) => Index -> Value -> Value -> m Value
+        f k v1 v2 = if v1==v2
+                    then return v1
+                    else CME.throwError $ printf "Conflict for key %s: %s and %s " (show k) (show v1) (show v2)
 
 -- See: http://stackoverflow.com/a/19896320/98600
 unionWithM :: (Monad m, Ord k) => (a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
 unionWithM f mapA mapB =
   Tr.sequence $ M.unionWith (\a b -> do {x <- a; y <- b; f x y}) (M.map return mapA) (M.map return mapB)
+
+unionWithKeyM :: (Monad m, Ord k) => (k -> a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
+unionWithKeyM f mapA mapB =
+  Tr.sequence $ M.unionWithKey (\k a b -> do {x <- a; y <- b; f k x y}) (M.map return mapA) (M.map return mapB)
+
+mapWithKeyM :: (Monad m, Ord k) => (k -> a -> m a) -> M.Map k a -> m (M.Map k a)
+mapWithKeyM f mapA =
+  Tr.sequence $ M.mapWithKey (\k a -> do {x <- a; f k x}) (M.map return mapA)
 
 ------------------------------------------------------------------------------
 -- Subsumption
@@ -314,5 +440,10 @@ subsumes a b =
 
     subV :: Value -> Value -> Bool
     subV (ValIndex i1) v2 | M.member i1 d1 = subV (d1 M.! i1) v2
+                          | otherwise      = True
     subV v1 (ValIndex i2) | M.member i2 d2 = subV v1 (d2 M.! i2)
+                          | otherwise      = False -- ?
+    subV ValNull v2 = True
+    subV (ValAVM avm) v2  | avm == nullAVM = True
+    -- subV v1 (ValAVM avm)  | avm == nullAVM = True
     subV v1 v2 = v1 == v2
