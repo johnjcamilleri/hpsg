@@ -102,30 +102,31 @@ distinctIndices :: AVM -> AVM -> Bool
 distinctIndices a b =
   L.intersect (getIndices a) (getIndices b) == []
 
--- | Go over AVM and clear middle dictionaries.
---   This involves pushing them up to the top level, possibly with renaming.
-cleanMiddleDicts :: AVM -> AVM
-cleanMiddleDicts avm = AVM b' d'
-  where
-    (b',d') = CMS.runState (s (avmBody avm)) (avmDict avm)
-    s :: (CMS.MonadState Dict m) => AVMap -> m AVMap
-    s = mapWithKeyM (const f)
+-- -- | Go over AVM and clear middle dictionaries.
+-- --   This involves pushing them up to the top level, possibly with renaming.
+-- cleanMiddleDicts :: AVM -> AVM
+-- cleanMiddleDicts avm = AVM b' d'
+-- -- TODO: this should also apply to AVMs in the dictionary
+--   where
+--     (b',d') = CMS.runState (s (avmBody avm)) (avmDict avm)
+--     s :: (CMS.MonadState Dict m) => AVMap -> m AVMap
+--     s = mapWithKeyM (const f)
 
-    f :: (CMS.MonadState Dict m) => Value -> m Value
-    f v@(ValAVM (AVM b d))
-      | M.null d  = return v
-      | otherwise = do
-          dict <- CMS.get
-          let is = [1..] L.\\ M.keys dict         -- available indices
-              rs = M.fromList $ zip (M.keys d) is -- map of replacements
-          CMS.modify (M.union (M.fromList [ (rs M.! k,v) | (k,v) <- M.toList d]))
-          let b' = replaceIndices rs b
-              newAVM = cleanMiddleDicts $ AVM b' M.empty
-          return $ ValAVM newAVM
-    f (ValList vs) = do
-      vs' <- mapM f vs
-      return $ ValList vs'
-    f v = return v
+--     f :: (CMS.MonadState Dict m) => Value -> m Value
+--     f v@(ValAVM (AVM b d))
+--       | M.null d  = return v
+--       | otherwise = do
+--           dict <- CMS.get
+--           let is = [1..] L.\\ M.keys dict         -- available indices
+--               rs = M.fromList $ zip (M.keys d) is -- map of replacements
+--           CMS.modify (M.union (M.fromList [ (rs M.! k,v) | (k,v) <- M.toList d]))
+--           let b' = replaceIndices rs b
+--               newAVM = cleanMiddleDicts $ AVM b' M.empty
+--           return $ ValAVM newAVM
+--     f (ValList vs) = do
+--       vs' <- mapM f vs
+--       return $ ValList vs'
+--     f v = return v
 
 replaceIndices :: M.Map Index Index -> AVMap -> AVMap
 replaceIndices rs = M.map f
@@ -315,7 +316,6 @@ unify a1 a2 = do
     f :: (CME.MonadError String m, CMS.MonadState Dict m) => Value -> Value -> m Value
 
     -- Consider indices first
-    -- TODO: this is still buggy
     f (ValIndex i1) (ValIndex i2) = do
       mv1 <- CMS.gets (lookupDict i1)
       mv2 <- CMS.gets (lookupDict i2)
@@ -323,11 +323,11 @@ unify a1 a2 = do
         (Just v1,Just v2) -> do
           v' <- f v1 v2
           CMS.modify (M.insert i1 v')
+          -- CMS.modify (M.delete i2) -- someone else might be referring to it...
           return $ ValIndex i1
         (Just v1,Nothing) -> return $ ValIndex i1
         (Nothing,Just v2) -> return $ ValIndex i2
         (Nothing,Nothing) -> return $ ValIndex i1 -- is that right?
-
     f (ValIndex i1) v2 = do
       mv1 <- CMS.gets (lookupDict i1)
       case mv1 of
@@ -443,7 +443,14 @@ subsumes a b =
                           | otherwise      = True
     subV v1 (ValIndex i2) | M.member i2 d2 = subV v1 (d2 M.! i2)
                           | otherwise      = False -- ?
+
+    subV (ValAVM avm1) (ValAVM avm2) =
+      let avm1' = AVM (avmBody avm1) d1
+          avm2' = AVM (avmBody avm2) d2
+      in subsumes avm1' avm2'
+
     subV ValNull v2 = True
-    subV (ValAVM avm) v2  | avm == nullAVM = True
-    -- subV v1 (ValAVM avm)  | avm == nullAVM = True
+    subV (ValAVM avm) v2 | avm == nullAVM = True
+    subV (ValList []) v2 = True
+
     subV v1 v2 = v1 == v2

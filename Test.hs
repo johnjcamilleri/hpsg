@@ -80,20 +80,20 @@ props = do
   -- putStrLn "Commutativity" >> quickCheckWith args prop_equality_commutative
 
   -- all pass ok...
-  -- putStrLn "[ Subsumption ]"
+  putStrLn "[ Subsumption ]"
   -- putStrLn "Least element" >> quickCheckWith args prop_subsumption_least
   -- putStrLn "Reflexivity" >> quickCheckWith args prop_subsumption_reflexive
   -- putStrLn "Transitivity" >> quickCheckWith args prop_subsumption_transitive
-  -- putStrLn "Anti-symmetry" >> quickCheckWith args prop_subsumption_antisymmetric
-  -- putStrLn "Implies unifiable" >> quickCheckWith args prop_subsumes_implies_unifiable
+  putStrLn "Anti-symmetry" >> quickCheckWith args prop_subsumption_antisymmetric
+  putStrLn "Implies unifiable" >> quickCheckWith args prop_subsumes_implies_unifiable
 
   -- putStrLn "[ Unification ]"
   -- putStrLn "Idempotency" >> quickCheckWith args prop_unification_idempotent -- ok
-  -- putStrLn "Commutativity" >> quickCheckWith args prop_unification_commutative
+  -- putStrLn "Commutativity" >> quickCheckWith args prop_unification_commutative -- ok
   -- putStrLn "Associativity" >> quickCheckWith args prop_unification_associative -- ok
   -- putStrLn "Absorption" >> quickCheckWith args prop_unification_absorbing
   -- putStrLn "Monotinicity" >> quickCheckWith args prop_unification_monotonic
-  putStrLn "Most general" >> quickCheckWith args prop_unification_most_general
+  -- putStrLn "Most general" >> quickCheckWith args prop_unification_most_general -- sometimes hangs, never CX
 
 ------------------------------------------------------------------------------
 -- Counter-examples
@@ -102,20 +102,39 @@ pp s avm = do
   putStrLn $ "--- " ++ s ++ " ---"
   putStrLn $ ppAVM avm
 
--- cx_idempotency = do
---   let a = mkAVM' [("B",ValIndex 2)] [(2,ValAtom "z")]
---   pp "a" a
---   pp "a & a" $ a & a
---   assert $ a ~= a & a
-
-cx_commutativity = do
-  let a = mkAVM' [("C",ValIndex 5)] [(5,ValList [])]
-  let b = mkAVM' [("C",ValIndex 3)] [(3,ValList [ValList [ValNull]])]
+cx_anti_symmetry = do
+  let a = mkAVM [("C",ValNull)]
+  let b = mkAVM [("C",vnullAVM)]
+  -- (a |< b) && (b |< a) ==> a ~= b
   pp "a" a
   pp "b" b
-  pp "a & b" $ a & b
-  pp "b & a" $ b & a
-  assert $ a & b ~= b & a
+  assert $ a |< b
+  assert $ b |< a
+  assert $ a ~= b
+
+cx_implies_unifiable = do
+  let a = mkAVM' [("B",ValIndex 1)] [(1,ValList [])]
+  let b = mkAVM  [("B",vmkAVM [("A",ValList [])] )]
+  -- a |< b ==> a &? b
+  pp "a" a
+  pp "b" b
+  assert $ a |< b
+  assert $ a &? b
+
+cx_idempotency = do
+  let a = mkAVM' [("B",ValIndex 2)] [(2,ValAtom "z")]
+  pp "a" a
+  pp "a & a" $ a & a
+  assert $ a ~= a & a
+
+-- cx_commutativity = do
+--   let a = mkAVM' [("C",ValIndex 5)] [(5,ValList [])]
+--   let b = mkAVM' [("C",ValIndex 3)] [(3,ValList [ValList [ValNull]])]
+--   pp "a" a
+--   pp "b" b
+--   pp "a & b" $ a & b
+--   pp "b & a" $ b & a
+--   assert $ a & b ~= b & a
 
 cx_absorption = do
   let a = mkAVM' [("C",ValIndex 1)] [(1,ValNull)]
@@ -126,12 +145,12 @@ cx_absorption = do
   assert $ a |< b
   assert $ a & b ~= b
 
--- TODO:
+-- TODO: This is problematic cos of cycles (best to just avoid)
 cx_most_general = do
   -- b &? c ==> let a = b & c in (b |< a) && (c |< a)
-  let b = mkAVM [("C",vmkAVM [("B",ValNull)] )]
-  let c = mkAVM [("C",vmkAVM [("A",ValList [])] )]
-
+  let b = mkAVM [("A",ValNull),("C",ValAtom "x")]
+  let c = mkAVM' [("A",ValIndex 1),("B",ValNull),("C",ValNull)]
+                 [(1,vmkAVM [("A",ValAtom "y"),("B",ValIndex 1),("C",ValAtom "z")])]
   pp "b" b
   pp "c" c
   putStrLn "b &? c"
@@ -164,7 +183,8 @@ instance Arbitrary AVM where
     let indices = getIndices (AVM body M.empty)
     vs :: [Value] <- mapM (\_ -> arbitrary `suchThat` (not.isIndex)) indices
     let dict = M.fromList (zip indices vs)
-    return $ cleanMiddleDicts $ AVM body dict
+    -- TODO: allow for non-bound variables
+    return $ AVM body dict
   shrink avm = [ AVM b (dictTrim b) | b <- shrink (avmBody avm) ]
     where
       -- Remove stuff from dicts which have been removed from body
@@ -184,7 +204,7 @@ instance Arbitrary Value where
     where
       arb :: Int -> Gen Value
       arb n = oneof
-              [ resize (n `div` 2) arbitrary >>= return . ValAVM
+              [ resize (n `div` 2) arbitraryAVMNoDict >>= return . ValAVM
               , arbitraryAtom >>= return . ValAtom
               , resize (n `div` 2) arbitrary >>= return . ValList
               , arbitraryIndex >>= return . ValIndex
@@ -194,6 +214,12 @@ instance Arbitrary Value where
     ValAVM avm -> map ValAVM (shrink avm)
     ValList vs -> map ValList (shrink vs)
     _ -> []
+
+-- | Arbitrary AVM with empty dictionary
+arbitraryAVMNoDict :: Gen AVM
+arbitraryAVMNoDict = do
+  avm <- arbitrary
+  return $ AVM (avmBody avm) M.empty
 
 -- | Arbitrary attribute name
 arbitraryAttr :: Gen String
@@ -212,53 +238,8 @@ arbitraryIndex = choose (1,5)
 
 assert :: Bool -> IO ()
 assert True  = putStrLn "Ok"
-assert False = error "Assertion failed"
-
--- General unification examples
--- http://www3.cs.stonybrook.edu/~ychoi/cse507/slides/08-unification.pdf
-
-sg = mkAVM [("NUMBER",ValAtom "sg")]
-pl = mkAVM [("NUMBER",ValAtom "pl")]
-nonum = mkAVM [("NUMBER",ValNull)]
-p3 = mkAVM [("PERSON",ValAtom "p3")]
-
-num_sg_per_p3 = vmkAVM [("NUMBER",ValAtom "sg"),("PERSON",ValAtom "p3")]
-num_pl_per_p3 = vmkAVM [("NUMBER",ValAtom "pl"),("PERSON",ValAtom "p3")]
-
-eg1a = mkAVM'
-       [ ("AGREEMENT",ValIndex 1)
-       , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" (ValIndex 1)) ]
-       [ (1, num_sg_per_p3) ]
-eg1b = mkAVM1 "SUBJECT" $ vmkAVM1 "AGREEMENT" num_sg_per_p3
-
-eg2a = mkAVM
-       [ ("AGREEMENT",ValIndex 1)
-       , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" (ValIndex 1)) ]
-eg2b = mkAVM1 "SUBJECT" $ vmkAVM1 "AGREEMENT" num_sg_per_p3
-
-eg3a = mkAVM'
-       [ ("AGREEMENT",ValIndex 1)
-       , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" (ValIndex 1)) ]
-       [ (1, num_sg_per_p3) ]
-eg3b = mkAVM
-       [ ("AGREEMENT",num_sg_per_p3)
-       , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" num_pl_per_p3) ]
-
-eg4a = mkAVM
-       [ ("AGREEMENT",vmkAVM1 "NUMBER" (ValAtom "sg"))
-       , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" (vmkAVM1 "NUMBER" (ValAtom "sg"))) ]
-eg4b = mkAVM1 "SUBJECT" (vmkAVM1 "AGREEMENT" num_sg_per_p3)
-
-suite :: IO ()
-suite = do
-  assert $ (sg & sg) == sg
-  assert $ not (sg &? pl)
-  assert $ sg & nonum == sg
-  assert $ (sg & p3) == AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}
-  assert $ (eg1a & eg1b) == AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1),(Attr "SUBJECT",ValAVM (AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1)], avmDict = M.fromList []}))], avmDict = M.fromList [(1,ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}))]}
-  assert $ (eg2a & eg2b) == AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1),(Attr "SUBJECT",ValAVM (AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1)], avmDict = M.fromList []}))], avmDict = M.fromList [(1,ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}))]}
-  assert $ not (eg3a &? eg3b)
-  assert $ (eg4a & eg4b) == AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg")], avmDict = M.fromList []})),(Attr "SUBJECT",ValAVM (AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}))], avmDict = M.fromList []}))], avmDict = M.fromList []}
+-- assert False = error "Assertion failed"
+assert False = putStrLn "Assertion failed"
 
 -- Subsumption
 -- http://cs.haifa.ac.il/~shuly/teaching/06/nlp/ug2.pdf
@@ -283,10 +264,114 @@ suite_sub = do
   assert $ not (subsumable num_sg num_pl)
   assert $ not (subsumable num_sg per_3)
 
+-- Unification
+
+suite_uni :: IO ()
+suite_uni = do
+
+  -- http://www3.cs.stonybrook.edu/~ychoi/cse507/slides/08-unification.pdf
+  let
+    sg = mkAVM [("NUMBER",ValAtom "sg")]
+    pl = mkAVM [("NUMBER",ValAtom "pl")]
+    nonum = mkAVM [("NUMBER",ValNull)]
+    p3 = mkAVM [("PERSON",ValAtom "p3")]
+
+    num_sg_per_p3 = vmkAVM [("NUMBER",ValAtom "sg"),("PERSON",ValAtom "p3")]
+    num_pl_per_p3 = vmkAVM [("NUMBER",ValAtom "pl"),("PERSON",ValAtom "p3")]
+
+    eg1a = mkAVM'
+           [ ("AGREEMENT",ValIndex 1)
+           , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" (ValIndex 1)) ]
+           [ (1, num_sg_per_p3) ]
+    eg1b = mkAVM1 "SUBJECT" $ vmkAVM1 "AGREEMENT" num_sg_per_p3
+
+    eg2a = mkAVM
+           [ ("AGREEMENT",ValIndex 1)
+           , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" (ValIndex 1)) ]
+    eg2b = mkAVM1 "SUBJECT" $ vmkAVM1 "AGREEMENT" num_sg_per_p3
+
+    eg3a = mkAVM'
+           [ ("AGREEMENT",ValIndex 1)
+           , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" (ValIndex 1)) ]
+           [ (1, num_sg_per_p3) ]
+    eg3b = mkAVM
+           [ ("AGREEMENT",num_sg_per_p3)
+           , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" num_pl_per_p3) ]
+
+    eg4a = mkAVM
+           [ ("AGREEMENT",vmkAVM1 "NUMBER" (ValAtom "sg"))
+           , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" (vmkAVM1 "NUMBER" (ValAtom "sg"))) ]
+    eg4b = mkAVM1 "SUBJECT" (vmkAVM1 "AGREEMENT" num_sg_per_p3)
+
+  assert $ (sg & sg) == sg
+  assert $ not (sg &? pl)
+  assert $ sg & nonum == sg
+  assert $ (sg & p3) == AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}
+  assert $ (eg1a & eg1b) == AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1),(Attr "SUBJECT",ValAVM (AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1)], avmDict = M.fromList []}))], avmDict = M.fromList [(1,ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}))]}
+  assert $ (eg2a & eg2b) == AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1),(Attr "SUBJECT",ValAVM (AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1)], avmDict = M.fromList []}))], avmDict = M.fromList [(1,ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}))]}
+  assert $ not (eg3a &? eg3b)
+  assert $ (eg4a & eg4b) == AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg")], avmDict = M.fromList []})),(Attr "SUBJECT",ValAVM (AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}))], avmDict = M.fromList []}))], avmDict = M.fromList []}
+
+suite_uni_2 :: IO ()
+suite_uni_2 = do
+  -- http://cs.haifa.ac.il/~shuly/teaching/06/nlp/ug2.pdf
+  let
+    a = mkAVM [ ("F",vmkAVM1 "NUM" (ValAtom "sg"))
+              , ("G",vmkAVM1 "PERS" (ValAtom "third")) ]
+    b = mkAVM [ ("F",ValIndex 1)
+              , ("G",ValIndex 1) ]
+    aub = mkAVM' [ ("F",ValIndex 1)
+                 , ("G",ValIndex 1) ]
+                 [ (1, vmkAVM [("NUM", ValAtom "sg"), ("PERS", ValAtom "third")] )]
+  assert $ a & b == aub
+
+  let
+    a = mkAVM [ ("F",ValIndex 1) ]
+    b = mkAVM [ ("F",vmkAVM1 "H" (ValAtom "b")) ]
+    aub = mkAVM' [ ("F",ValIndex 1) ]
+                 [ (1, vmkAVM1 "H" (ValAtom "b")) ]
+  assert $ a & b == aub
+
+  let
+    num_sg  = vmkAVM [("NUM",ValAtom "sg")]
+    per_3rd = vmkAVM [("PERS",ValAtom "3rd")]
+    num_pers = vmkAVM [("NUM",ValAtom "sg"),("PERS",ValAtom "3rd")]
+    a = mkAVM [ ("F",num_sg), ("G",num_sg) ]
+    b = mkAVM [ ("F",per_3rd) ]
+    aub = mkAVM [ ("F",num_pers)
+                , ("G",num_sg) ]
+    a' = mkAVM' [ ("F",ValIndex 1)
+                , ("G",ValIndex 1) ]
+                [ (1,num_sg) ]
+    a'ub = mkAVM' [ ("F",ValIndex 1)
+                  , ("G",ValIndex 1) ]
+                  [ (1,num_pers) ]
+  assert $ a & b == aub
+  assert $ a' & b == a'ub
+
+suite_uni_bind :: IO ()
+suite_uni_bind = do
+  -- http://cs.haifa.ac.il/~shuly/teaching/06/nlp/ug2.pdf
+  let
+    num_sg  = vmkAVM [("NUM",ValAtom "sg")]
+    per_3rd = vmkAVM [("PERS",ValAtom "3rd")]
+    num_per = vmkAVM [("NUM",ValAtom "sg"),("PERS",ValAtom "3rd")]
+    a = mkAVM' [ ("F",ValIndex 1) ]
+               [ (1, num_sg) ]
+    b = mkAVM' [ ("F",ValIndex 2) ]
+               [ (2, per_3rd) ]
+    aub = mkAVM' [ ("F",ValIndex 1) ]
+                 [ (1, num_per) ]
+  -- putStrLn $ ppAVM $ a & b
+  -- putStrLn $ ppAVM $ aub
+  assert $ a & b ~= aub
+
 ------------------------------------------------------------------------------
 -- One to rule them all
 
 regression :: IO ()
 regression = do
-  suite
   suite_sub
+  suite_uni
+  suite_uni_2
+  suite_uni_bind
