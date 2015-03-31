@@ -27,7 +27,7 @@ data Value = ValAVM AVM      -- ^ A sub-structure (with its own dictionary - sho
            | ValAtom Atom    -- ^ Atomic value
            | ValList [Value] -- ^ List of values
            | ValIndex Index  -- ^ Index to structure in dict
-           | ValNull         -- ^ Often given as empty list []
+           -- | ValNull         -- ^ Often given as empty list []
   deriving (Eq, Ord, Show)
 
 -- | Used for structure sharing
@@ -206,7 +206,7 @@ showValue v f =
         mapM_ (\v -> CMW.tell "," >> showValue v f) (tail vs)
       CMW.tell ">"
     ValIndex i -> CMW.tell $ "#"++show i
-    ValNull    -> CMW.tell "[]"
+    -- ValNull    -> CMW.tell "[]"
 
 ppAVM :: AVM -> String
 ppAVM avm = CMW.execWriter f
@@ -229,6 +229,7 @@ ppAVM avm = CMW.execWriter f
       else return ()
 
     go :: (CMW.MonadWriter String m) => Int -> AVMap -> m ()
+    go l av | M.null av = putStr "[]"
     go l av = do
       putStr $ "["
       -- case M.lookup (Attr "SORT") (avmBody avm) of
@@ -381,14 +382,16 @@ unify a1 a2 = do
     -- Empty lists should be treated like nulls
     -- f (ValList []) v2 = return v2
     -- f v1 (ValList []) = return v1
+
     -- Singleton lists should be treated like their head
     -- f (ValList [v1']) (ValList [v2']) = f v1' v2'
     -- f (ValList [v1']) v2 = f v1' v2
     -- f v1 (ValList [v2']) = f v1 v2'
     -- f (ValList l1) (ValList l2) = return $ ValList (l1++l2)
 
-    f ValNull v2 = return v2
-    f v1 ValNull = return v1
+    -- This must match with treatment of nulls in subsumption
+    -- f ValNull v2 = return v2
+    -- f v1 ValNull = return v1
     f v1 v2 = CME.throwError $ printf "Cannot unify:\n  %s\n  %s" (show v1) (show v2)
 
     dictMerge :: (CME.MonadError String m) => Dict -> Dict -> m Dict
@@ -407,6 +410,14 @@ unionWithM f mapA mapB =
 unionWithKeyM :: (Monad m, Ord k) => (k -> a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
 unionWithKeyM f mapA mapB =
   Tr.sequence $ M.unionWithKey (\k a b -> do {x <- a; y <- b; f k x y}) (M.map return mapA) (M.map return mapB)
+
+intersectionWithM :: (Monad m, Ord k) => (a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
+intersectionWithM f mapA mapB =
+  Tr.sequence $ M.intersectionWith (\a b -> do {x <- a; y <- b; f x y}) (M.map return mapA) (M.map return mapB)
+
+intersectionWithKeyM :: (Monad m, Ord k) => (k -> a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
+intersectionWithKeyM f mapA mapB =
+  Tr.sequence $ M.intersectionWithKey (\k a b -> do {x <- a; y <- b; f k x y}) (M.map return mapA) (M.map return mapB)
 
 mapWithKeyM :: (Monad m, Ord k) => (k -> a -> m a) -> M.Map k a -> m (M.Map k a)
 mapWithKeyM f mapA =
@@ -449,8 +460,40 @@ subsumes a b =
           avm2' = AVM (avmBody avm2) d2
       in subsumes avm1' avm2'
 
-    subV ValNull v2 = True
-    subV (ValAVM avm) v2 | avm == nullAVM = True
-    subV (ValList []) v2 = True
+    -- This must match with treatment of nulls in unification
+    -- subV ValNull v2 = True
+    -- subV v1 ValNull = True
+    -- subV (ValAVM avm) v2 | avm == nullAVM = True
+    -- subV (ValList []) v2 = True
 
     subV v1 v2 = v1 == v2
+
+------------------------------------------------------------------------------
+-- Generalisation
+
+-- | Generalisation
+(|^|) :: AVM -> AVM -> AVM
+(|^|) = generalise
+
+infixl 6 |^| -- same as +
+
+-- | Generalisation
+generalise :: AVM -> AVM -> AVM
+generalise a1 a2 = AVM body dict
+  where
+    (b1,d1) = (avmBody a1, avmDict a1)
+    (b2,d2) = (avmBody a2, avmDict a2)
+    body = M.map fromJust $ M.filter isJust $ M.intersectionWithKey genV b1 b2
+    dict = M.empty -- TODO
+
+    genV :: Attribute -> Value -> Value -> Maybe Value
+    genV k (ValIndex i1) v2 | M.member i1 d1 = genV k (d1 M.! i1) v2
+                            | otherwise      = Nothing
+    genV k v1 (ValIndex i2) | M.member i2 d2 = genV k v1 (d2 M.! i2)
+                            | otherwise      = Nothing
+    genV k v1@(ValAVM avm) v2 | avm == nullAVM = Just v1
+    genV k v1 v2@(ValAVM avm) | avm == nullAVM = Just v2
+    genV k v1 v2 =
+      if v1 == v2
+      then Just v1
+      else Nothing

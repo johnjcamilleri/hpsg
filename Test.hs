@@ -17,6 +17,8 @@ prop_equality_commutative :: AVM -> AVM -> Property
 prop_equality_commutative a b =
   a ~= b ==> b ~= a
 
+--
+
 prop_subsumption_least :: AVM -> Bool
 prop_subsumption_least a = nullAVM |< a
 
@@ -31,9 +33,13 @@ prop_subsumption_antisymmetric :: AVM -> AVM -> Property
 prop_subsumption_antisymmetric a b =
   (a |< b) && (b |< a) ==> a ~= b
 
+--
+
 prop_subsumes_implies_unifiable :: AVM -> AVM -> Property
 prop_subsumes_implies_unifiable a b =
   a |< b ==> a &? b
+
+--
 
 prop_unification_idempotent :: AVM -> Bool
 prop_unification_idempotent a =
@@ -61,11 +67,28 @@ prop_unification_absorbing a b =
 
 prop_unification_monotonic :: AVM -> AVM -> AVM -> Property
 prop_unification_monotonic a b c =
-  a |< b ==> (a & c) |< (b & c)
+  and
+    [ a |< b
+    , a &? c
+    , b &? c
+    ] ==> (a & c) |< (b & c)
 
 prop_unification_most_general :: AVM -> AVM -> Property
 prop_unification_most_general b c =
   b &? c ==> let a = b & c in (b |< a) && (c |< a)
+
+--
+
+prop_generalisation_idempotent :: AVM -> Bool
+prop_generalisation_idempotent a = (a |^| a ~= a)
+
+prop_generalisation_commutative :: AVM -> AVM -> Property
+prop_generalisation_commutative a b =
+  (distinctDicts a b) ==> (a |^| b ~= b |^| a)
+
+prop_generalisation_absorbing :: AVM -> AVM -> Property
+prop_generalisation_absorbing a b =
+  a |< b ==> a |^| b ~= a
 
 props = do
   let args = stdArgs
@@ -75,25 +98,28 @@ props = do
         , maxDiscardRatio = 100 -- default = 10
         }
 
-  -- gives up!
   -- putStrLn "[ Equality ]"
   -- putStrLn "Commutativity" >> quickCheckWith args prop_equality_commutative
-
-  -- all pass ok...
-  putStrLn "[ Subsumption ]"
-  -- putStrLn "Least element" >> quickCheckWith args prop_subsumption_least
-  -- putStrLn "Reflexivity" >> quickCheckWith args prop_subsumption_reflexive
-  -- putStrLn "Transitivity" >> quickCheckWith args prop_subsumption_transitive
-  putStrLn "Anti-symmetry" >> quickCheckWith args prop_subsumption_antisymmetric
-  putStrLn "Implies unifiable" >> quickCheckWith args prop_subsumes_implies_unifiable
-
-  -- putStrLn "[ Unification ]"
+  -- putStrLn ""
+  -- putStrLn "[ Subsumption ]"
+  -- putStrLn "Least element" >> quickCheckWith args prop_subsumption_least -- ok
+  -- putStrLn "Reflexivity" >> quickCheckWith args prop_subsumption_reflexive -- ok
+  -- putStrLn "Transitivity" >> quickCheckWith args prop_subsumption_transitive -- ok
+  -- putStrLn "Anti-symmetry" >> quickCheckWith args prop_subsumption_antisymmetric -- ok
+  -- putStrLn "Implies unifiable" >> quickCheckWith args prop_subsumes_implies_unifiable -- ok
+  -- putStrLn ""
+  putStrLn "[ Unification ]"
   -- putStrLn "Idempotency" >> quickCheckWith args prop_unification_idempotent -- ok
   -- putStrLn "Commutativity" >> quickCheckWith args prop_unification_commutative -- ok
   -- putStrLn "Associativity" >> quickCheckWith args prop_unification_associative -- ok
-  -- putStrLn "Absorption" >> quickCheckWith args prop_unification_absorbing
-  -- putStrLn "Monotinicity" >> quickCheckWith args prop_unification_monotonic
-  -- putStrLn "Most general" >> quickCheckWith args prop_unification_most_general -- sometimes hangs, never CX
+  -- putStrLn "Absorption" >> quickCheckWith args prop_unification_absorbing -- ok
+  putStrLn "Monotinicity" >> quickCheckWith args prop_unification_monotonic -- not ok
+  putStrLn "Most general" >> quickCheckWith args prop_unification_most_general -- not ok
+  -- putStrLn ""
+  -- putStrLn "[ Generalisation ]"
+  -- putStrLn "Idempotency" >> quickCheckWith args prop_generalisation_idempotent -- ok
+  -- putStrLn "Commutativity" >> quickCheckWith args prop_generalisation_commutative -- ok
+  -- putStrLn "Absorption" >> quickCheckWith args prop_generalisation_absorbing -- ok
 
 ------------------------------------------------------------------------------
 -- Counter-examples
@@ -102,30 +128,30 @@ pp s avm = do
   putStrLn $ "--- " ++ s ++ " ---"
   putStrLn $ ppAVM avm
 
-cx_anti_symmetry = do
-  let a = mkAVM [("C",ValNull)]
-  let b = mkAVM [("C",vnullAVM)]
-  -- (a |< b) && (b |< a) ==> a ~= b
-  pp "a" a
-  pp "b" b
-  assert $ a |< b
-  assert $ b |< a
-  assert $ a ~= b
+-- cx_anti_symmetry = do
+--   let a = mkAVM [("C",ValNull)]
+--   let b = mkAVM [("C",vnullAVM)]
+--   -- (a |< b) && (b |< a) ==> a ~= b
+--   pp "a" a
+--   pp "b" b
+--   assert $ a |< b
+--   assert $ b |< a
+--   assert $ a ~= b
 
-cx_implies_unifiable = do
-  let a = mkAVM' [("B",ValIndex 1)] [(1,ValList [])]
-  let b = mkAVM  [("B",vmkAVM [("A",ValList [])] )]
-  -- a |< b ==> a &? b
-  pp "a" a
-  pp "b" b
-  assert $ a |< b
-  assert $ a &? b
+-- cx_implies_unifiable = do
+--   let a = mkAVM' [("B",ValIndex 1)] [(1,ValList [])]
+--   let b = mkAVM  [("B",vmkAVM [("A",ValList [])] )]
+--   -- a |< b ==> a &? b
+--   pp "a" a
+--   pp "b" b
+--   assert $ a |< b
+--   assert $ a &? b
 
-cx_idempotency = do
-  let a = mkAVM' [("B",ValIndex 2)] [(2,ValAtom "z")]
-  pp "a" a
-  pp "a & a" $ a & a
-  assert $ a ~= a & a
+-- cx_idempotency = do
+--   let a = mkAVM' [("B",ValIndex 2)] [(2,ValAtom "z")]
+--   pp "a" a
+--   pp "a & a" $ a & a
+--   assert $ a ~= a & a
 
 -- cx_commutativity = do
 --   let a = mkAVM' [("C",ValIndex 5)] [(5,ValList [])]
@@ -136,21 +162,39 @@ cx_idempotency = do
 --   pp "b & a" $ b & a
 --   assert $ a & b ~= b & a
 
-cx_absorption = do
-  let a = mkAVM' [("C",ValIndex 1)] [(1,ValNull)]
-  let b = mkAVM' [("B",ValList [vmkAVM [("B",ValIndex 1)]]),("C",ValNull)] [(1,ValAtom "x")]
+-- cx_absorption = do
+--   let a = mkAVM' [("C",ValIndex 1)] [(1,ValNull)]
+--   let b = mkAVM' [("B",ValList [vmkAVM [("B",ValIndex 1)]]),("C",ValNull)] [(1,ValAtom "x")]
+--   pp "a" a
+--   pp "b" b
+--   pp "a & b" $ a & b
+--   assert $ a |< b
+--   assert $ a & b ~= b
+
+cx_monotonic = do
+  -- a |< b ==> (a & c) |< (b & c)
+  let a = nullAVM
+  let b = mkAVM [("B",ValList [])]
+  let c = mkAVM [("B",vnullAVM)]
   pp "a" a
   pp "b" b
-  pp "a & b" $ a & b
+  pp "c" c
   assert $ a |< b
-  assert $ a & b ~= b
+  assert $ a &? c
+  assert $ b &? c
+  pp "a & c" $ a & c
+  pp "b & c" $ b & c
+  assert $ (a & c) |< (b & c)
 
--- TODO: This is problematic cos of cycles (best to just avoid)
 cx_most_general = do
   -- b &? c ==> let a = b & c in (b |< a) && (c |< a)
-  let b = mkAVM [("A",ValNull),("C",ValAtom "x")]
-  let c = mkAVM' [("A",ValIndex 1),("B",ValNull),("C",ValNull)]
-                 [(1,vmkAVM [("A",ValAtom "y"),("B",ValIndex 1),("C",ValAtom "z")])]
+  let b = mkAVM [("A",vnullAVM)]
+  let c = mkAVM' [("A",ValIndex 4)] [(4,ValList [])]
+
+  -- TODO: This is problematic cos of cycles (best to just avoid)
+  -- let b = mkAVM [("A",ValNull),("C",ValAtom "x")]
+  -- let c = mkAVM' [("A",ValIndex 1),("B",ValNull),("C",ValNull)]
+  --                [(1,vmkAVM [("A",ValAtom "y"),("B",ValIndex 1),("C",ValAtom "z")])]
   pp "b" b
   pp "c" c
   putStrLn "b &? c"
@@ -174,6 +218,17 @@ cx_merging_dicts = do
   pp "b" b
   pp "a & b" (a & b)
 
+-- cx_gen_absorption = do
+--   -- a |< b ==> a |^| b ~= a
+--   let
+--     a = mkAVM [("B",vnullAVM)]
+--     b = mkAVM [("B",vmkAVM [("C",ValList [])])]
+
+--   pp "a" a
+--   pp "b" b
+--   print (a |< b)
+--   pp "a |^| b" (a |^| b)
+
 ------------------------------------------------------------------------------
 -- Arbitrary instances
 
@@ -189,7 +244,7 @@ instance Arbitrary AVM where
     where
       -- Remove stuff from dicts which have been removed from body
       dictTrim :: AVMap -> Dict
-      dictTrim m = M.intersection (avmDict avm) (M.fromList [(i,ValNull) | i <- getIndices (AVM m M.empty)])
+      dictTrim m = M.intersection (avmDict avm) (M.fromList [(i,ValAtom "dummy") | i <- getIndices (AVM m M.empty)])
 
 instance (Ord a, Arbitrary a, Arbitrary v) => Arbitrary (M.Map a v) where
   arbitrary = arbitrary >>= return . M.fromList
@@ -208,7 +263,7 @@ instance Arbitrary Value where
               , arbitraryAtom >>= return . ValAtom
               , resize (n `div` 2) arbitrary >>= return . ValList
               , arbitraryIndex >>= return . ValIndex
-              , return ValNull
+              -- , return ValNull
               ]
   shrink v = case v of
     ValAVM avm -> map ValAVM (shrink avm)
@@ -273,7 +328,7 @@ suite_uni = do
   let
     sg = mkAVM [("NUMBER",ValAtom "sg")]
     pl = mkAVM [("NUMBER",ValAtom "pl")]
-    nonum = mkAVM [("NUMBER",ValNull)]
+    nonum = mkAVM [("NUMBER",vnullAVM)]
     p3 = mkAVM [("PERSON",ValAtom "p3")]
 
     num_sg_per_p3 = vmkAVM [("NUMBER",ValAtom "sg"),("PERSON",ValAtom "p3")]
@@ -366,6 +421,25 @@ suite_uni_bind = do
   -- putStrLn $ ppAVM $ aub
   assert $ a & b ~= aub
 
+suite_gen :: IO ()
+suite_gen = do
+  -- http://cs.haifa.ac.il/~shuly/teaching/06/nlp/ug2.pdf
+  let
+    num_sg  = mkAVM [("NUM",ValAtom "sg")]
+    num_pl  = mkAVM [("NUM",ValAtom "pl")]
+    per_3rd = mkAVM [("PERS",ValAtom "3rd")]
+    num_per = mkAVM [("NUM",ValAtom "sg"),("PERS",ValAtom "3rd")]
+    agr_num_sg = mkAVM [("AGR",ValAVM num_sg)]
+
+    x = mkAVM' [("F",ValIndex 1),("G",ValIndex 1)] [(1,ValAVM num_sg)]
+    y = mkAVM [("F",ValAVM num_sg),("G",ValAVM num_sg)]
+
+  assert $ num_sg |^| per_3rd ~= nullAVM
+  assert $ num_sg |^| num_pl ~= nullAVM
+  assert $ num_sg |^| num_per ~= num_sg
+  assert $ nullAVM |^| agr_num_sg ~= nullAVM
+  assert $ x |^| y ~= y
+
 ------------------------------------------------------------------------------
 -- One to rule them all
 
@@ -375,3 +449,4 @@ regression = do
   suite_uni
   suite_uni_2
   suite_uni_bind
+  suite_gen
