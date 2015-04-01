@@ -3,6 +3,7 @@
 module Test where
 
 import qualified Data.Map as M
+import Data.Maybe (fromJust)
 
 import Test.QuickCheck
 import qualified Control.Monad.Writer as CMW
@@ -440,6 +441,21 @@ suite_gen = do
   assert $ nullAVM |^| agr_num_sg ~= nullAVM
   assert $ x |^| y ~= y
 
+suite_val :: IO()
+suite_val = do
+  let
+    mavm = mkMultiAVM
+             [ mkAVM [("F",vmkAVM [("G", ValAtom "a"),("H", ValIndex 1)])]
+             , mkAVM [("G",ValIndex 2)]
+             , mkAVM [("F",vmkAVM [("H", ValAtom "b"),("G", ValIndex 1)]), ("H",ValAtom "a")]
+             ]
+    v :: Int -> [String] -> Value
+    v i as = fromJust $ mval mavm i (map Attr as)
+
+  assert $ (v 1 ["F"]) == (vmkAVM [("G", ValAtom "a"),("H", vnullAVM)])
+  assert $ (v 3 ["F"]) == (vmkAVM [("H", ValAtom "b"),("G", vnullAVM)])
+  assert $ (v 1 ["F","H"]) == (v 3 ["F","G"])
+
 ------------------------------------------------------------------------------
 -- One to rule them all
 
@@ -450,3 +466,4 @@ regression = do
   suite_uni_2
   suite_uni_bind
   suite_gen
+  suite_val
