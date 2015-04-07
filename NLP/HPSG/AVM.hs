@@ -28,8 +28,12 @@ data Value = ValAVM AVM      -- ^ A sub-structure (with its own dictionary - sho
            | ValAtom Atom    -- ^ Atomic value
            | ValList [Value] -- ^ List of values
            | ValIndex Index  -- ^ Index to structure in dict
-           -- | ValNull         -- ^ Often given as empty list []
   deriving (Eq, Ord, Show)
+
+isValAVM   v = case v of ValAVM _ -> True ; _ -> False
+isValAtom  v = case v of ValAtom _ -> True ; _ -> False
+isValList  v = case v of ValList _ -> True ; _ -> False
+isValIndex v = case v of ValIndex _ -> True ; _ -> False
 
 type Path = [Attribute]
 
@@ -56,12 +60,25 @@ type Dict = M.Map Index Value
 
 -- | Multi-AVM
 data MultiAVM = MultiAVM {
-  -- ^ The inner AVMs
-  mavmBody :: [AVMap],
+  -- ^ The inner AVMs or indices. Lists and atoms here are illegal.
+  mavmBody :: [Value],
   -- ^ Dictionary used for structure sharing
   mavmDict :: Dict
   }
   deriving (Eq, Ord, Show)
+
+-- | Convert Multi-AVM to single AVM
+--   Indexes start from 1
+--   Throws error if index is out of range
+toAVM :: MultiAVM -> Int -> AVM
+toAVM mavm i = AVM (body) (mavmDict mavm)
+  where
+    body = case (mavmBody mavm) !! (i-1) of
+      ValAVM avm -> avmBody avm
+      ValIndex ix -> case M.lookup ix (mavmDict mavm) of
+        Just (ValAVM avm) -> avmBody avm -- dictionary?
+        _ -> error $ "Cannot convert to AVM"
+      _ -> error $ "Illegal MultiAVM: " ++ show mavm
 
 ------------------------------------------------------------------------------
 -- Helpers
@@ -87,9 +104,7 @@ val' avm a = fmap (tryResolve (avmDict avm)) (M.lookup a (avmBody avm))
 -- | val extended for multi-AVMs
 --   Indexes start from 1
 mval :: MultiAVM -> Int -> Path -> Maybe Value
-mval mavm i = val avm
-  where
-    avm = AVM ((mavmBody mavm) !! (i-1)) (mavmDict mavm)
+mval mavm i = val (toAVM mavm i)
 
 -- | Recurse through values and try to resolve indices, filling with nullAVM where not bound
 --   This seems to be the desired behaviour of the val function
@@ -251,28 +266,43 @@ mkAVM l = AVM (attrMap l) M.empty
 mkAVM' :: AVList -> [(Index,Value)] -> AVM
 mkAVM' l d = AVM (attrMap l) (M.fromList d)
 
+-- | Add a dictionary to an AVM (overwrite)
+addDict :: AVM -> [(Index,Value)] -> AVM
+addDict avm d = avm { avmDict = M.fromList d }
+
 -- | Make an AVM as a Value
 vmkAVM :: AVList -> Value
 vmkAVM = ValAVM . mkAVM
 
--- | Make an AVM with a dictionary as a Value
-vmkAVM' :: AVList -> [(Index,Value)] -> Value
-vmkAVM' l d = ValAVM $ mkAVM' l d
+-- -- | Make an AVM with a dictionary as a Value
+-- vmkAVM' :: AVList -> [(Index,Value)] -> Value
+-- vmkAVM' l d = ValAVM $ mkAVM' l d
 
 -- -- | Make an AVM with a name
 -- mkAVMNamed :: Sort -> [(Attribute,Value)] -> AVM
 -- mkAVMNamed name l = AVM (M.fromList ((Attr "SORT",ValAtom name):l)) M.empty
 
 -- | Make a multi-AVM
-mkMultiAVM :: [AVM] -> MultiAVM
-mkMultiAVM avms = MultiAVM body dict
+mkMultiAVM :: [Value] -> MultiAVM
+mkMultiAVM vals | not $ all (\v -> isValAVM v || isValIndex v) vals = error $ "mkMultiAVM: invalid values: " ++ show vals
+mkMultiAVM vals = MultiAVM body dict
   where
-    body = map avmBody avms
+    avms = map (\(ValAVM avm) -> avm) (filter isValAVM vals)
+    body = vals
     dict = foldl mergeDicts M.empty (map avmDict avms)
+-- mkMultiAVM :: [AVM] -> MultiAVM
+-- mkMultiAVM avms = MultiAVM body dict
+--   where
+--     body = map (MAVM_AVMap . avmBody) avms
+--     dict = foldl mergeDicts M.empty (map avmDict avms)
 
 -- | Un-make a multi-AVM into a list of AVMs
 unMultiAVM :: MultiAVM -> [AVM]
-unMultiAVM mavm = [ AVM avmap (mavmDict mavm) | avmap <- mavmBody mavm ]
+unMultiAVM mavm = map (toAVM mavm) [1..length (mavmBody mavm)]
+
+-- | Add a dictionary to a MultiAVM
+maddDict :: MultiAVM -> [(Index,Value)] -> MultiAVM
+maddDict mavm d = mavm { mavmDict = M.fromList d }
 
 ------------------------------------------------------------------------------
 -- Pretty print
@@ -295,7 +325,6 @@ showValue v f =
         mapM_ (\v -> CMW.tell "," >> showValue v f) (tail vs)
       CMW.tell ">"
     ValIndex i -> CMW.tell $ "#"++show i
-    -- ValNull    -> CMW.tell "[]"
 
 ppAVM :: AVM -> String
 ppAVM avm = CMW.execWriter f
@@ -445,7 +474,7 @@ unify a1 a2 = do
     --       CMS.modify (\(d1,d2) -> (M.insert i1 v1' d1, d2))
     --     Nothing ->
     --       CMS.modify (\(d1,d2) -> (M.insert i1 v2 d1, d2))
-    --   -- CMS.get >>= \s -> trace (show s) (return ValNull)
+    --   -- CMS.get >>= \s -> trace (show s) (return vnullAVM)
     --   return $ ValIndex i1
     -- f v1 (ValIndex i2) = do
     --   mv2 <- CMS.gets (\(d1,d2) -> lookupDict i2 d2)
@@ -455,7 +484,7 @@ unify a1 a2 = do
     --       CMS.modify (\(d1,d2) -> (d1, M.insert i2 v2' d2))
     --     Nothing ->
     --       CMS.modify (\(d1,d2) -> (d1, M.insert i2 v1 d2))
-    --   -- CMS.get >>= \s -> trace (show s) (return ValNull)
+    --   -- CMS.get >>= \s -> trace (show s) (return vnullAVM)
     --   return $ ValIndex i2
 
     -- General equality
@@ -479,8 +508,6 @@ unify a1 a2 = do
     -- f (ValList l1) (ValList l2) = return $ ValList (l1++l2)
 
     -- This must match with treatment of nulls in subsumption
-    -- f ValNull v2 = return v2
-    -- f v1 ValNull = return v1
     f v1 v2 = CME.throwError $ printf "Cannot unify:\n  %s\n  %s" (show v1) (show v2)
 
     dictMerge :: (CME.MonadError String m) => Dict -> Dict -> m Dict
@@ -496,30 +523,9 @@ munify :: MultiAVM -> MultiAVM -> Either String MultiAVM
 munify a b | length (mavmBody a) /= length (mavmBody b) = Left "Multi-AVMs have different length"
            | otherwise = if length ls > 0
                          then Left  $ unlines ls
-                         else Right $ mkMultiAVM rs
-               where us = [ p `unify` q | (p,q) <- zip (unMultiAVM a) (unMultiAVM b) ]
+                         else Right $ mkMultiAVM (map ValAVM rs)
+               where us = [ p `unify` q | (p,q) <- zip (unMultiAVM a) (unMultiAVM b) ] :: [Either String AVM]
                      (ls,rs) = partitionEithers us
-
--- See: http://stackoverflow.com/a/19896320/98600
-unionWithM :: (Monad m, Ord k) => (a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
-unionWithM f mapA mapB =
-  Tr.sequence $ M.unionWith (\a b -> do {x <- a; y <- b; f x y}) (M.map return mapA) (M.map return mapB)
-
-unionWithKeyM :: (Monad m, Ord k) => (k -> a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
-unionWithKeyM f mapA mapB =
-  Tr.sequence $ M.unionWithKey (\k a b -> do {x <- a; y <- b; f k x y}) (M.map return mapA) (M.map return mapB)
-
-intersectionWithM :: (Monad m, Ord k) => (a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
-intersectionWithM f mapA mapB =
-  Tr.sequence $ M.intersectionWith (\a b -> do {x <- a; y <- b; f x y}) (M.map return mapA) (M.map return mapB)
-
-intersectionWithKeyM :: (Monad m, Ord k) => (k -> a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
-intersectionWithKeyM f mapA mapB =
-  Tr.sequence $ M.intersectionWithKey (\k a b -> do {x <- a; y <- b; f k x y}) (M.map return mapA) (M.map return mapB)
-
-mapWithKeyM :: (Monad m, Ord k) => (k -> a -> m a) -> M.Map k a -> m (M.Map k a)
-mapWithKeyM f mapA =
-  Tr.sequence $ M.mapWithKey (\k a -> do {x <- a; f k x}) (M.map return mapA)
 
 ------------------------------------------------------------------------------
 -- Subsumption
@@ -559,8 +565,6 @@ subsumes a b =
       in subsumes avm1' avm2'
 
     -- This must match with treatment of nulls in unification
-    -- subV ValNull v2 = True
-    -- subV v1 ValNull = True
     -- subV (ValAVM avm) v2 | avm == nullAVM = True
     -- subV (ValList []) v2 = True
 
@@ -602,3 +606,27 @@ generalise a1 a2 = AVM body dict
       if v1 == v2
       then Just v1
       else Nothing
+
+------------------------------------------------------------------------------
+-- Monadic Map functions
+
+-- See: http://stackoverflow.com/a/19896320/98600
+unionWithM :: (Monad m, Ord k) => (a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
+unionWithM f mapA mapB =
+  Tr.sequence $ M.unionWith (\a b -> do {x <- a; y <- b; f x y}) (M.map return mapA) (M.map return mapB)
+
+unionWithKeyM :: (Monad m, Ord k) => (k -> a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
+unionWithKeyM f mapA mapB =
+  Tr.sequence $ M.unionWithKey (\k a b -> do {x <- a; y <- b; f k x y}) (M.map return mapA) (M.map return mapB)
+
+intersectionWithM :: (Monad m, Ord k) => (a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
+intersectionWithM f mapA mapB =
+  Tr.sequence $ M.intersectionWith (\a b -> do {x <- a; y <- b; f x y}) (M.map return mapA) (M.map return mapB)
+
+intersectionWithKeyM :: (Monad m, Ord k) => (k -> a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
+intersectionWithKeyM f mapA mapB =
+  Tr.sequence $ M.intersectionWithKey (\k a b -> do {x <- a; y <- b; f k x y}) (M.map return mapA) (M.map return mapB)
+
+mapWithKeyM :: (Monad m, Ord k) => (k -> a -> m a) -> M.Map k a -> m (M.Map k a)
+mapWithKeyM f mapA =
+  Tr.sequence $ M.mapWithKey (\k a -> do {x <- a; f k x}) (M.map return mapA)
