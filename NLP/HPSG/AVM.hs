@@ -117,6 +117,26 @@ tryResolve dict v = case v of
     Nothing -> vnullAVM -- default value when unbound
     Just x -> x
 
+-- | Remove an attribute from an AVM
+--   Only works one level deep
+--   Does not follow indices
+remAttr :: Attribute -> AVM -> (AVM,(Attribute,Maybe Value))
+remAttr a avm = (AVM body' dict, (a,rem))
+  where
+    body' = M.delete a (avmBody avm)
+    dict = avmDict avm
+    rem = M.lookup a (avmBody avm)
+
+-- | Add an attribute to an AVM
+--   Only works one level deep
+--   Does not follow indices
+addAttr :: (Attribute,Maybe Value) -> AVM -> AVM
+addAttr (_,Nothing) avm = avm
+addAttr (a,Just v) avm = AVM body' dict
+  where
+    body' = M.insert a v (avmBody avm)
+    dict = avmDict avm
+
 ------------------------------------------------------------------------------
 
 -- | Lookup in AVM dictionary, as deep as necessary
@@ -174,7 +194,7 @@ mergeDicts = M.unionWithKey f
     f :: Index -> Value -> Value -> Value
     f k v1 v2 = if v1==v2
                 then v1
-                else error $ printf "Conflict for key %s: %s and %s " (show k) (show v1) (show v2)
+                else error $ printf "mergeDicts: Conflict for key %s: %s and %s " (show k) (show v1) (show v2)
 
 -- -- | Go over AVM and clear middle dictionaries.
 -- --   This involves pushing them up to the top level, possibly with renaming.
@@ -307,25 +327,7 @@ maddDict mavm d = mavm { mavmDict = M.fromList d }
 ------------------------------------------------------------------------------
 -- Pretty print
 
-showValue :: (CMW.MonadWriter String m) => Value -> (AVM -> m ()) -> m ()
-showValue v f =
-  case v of
-    ValAVM avm ->
-      if M.size (avmDict avm) > 0
-      then error "Non-empty middle dictionary"
-      else f avm
-    ValAtom s  -> CMW.tell s
-    ValList vs -> do
-      CMW.tell "<"
-      if null vs
-      then return ()
-      else do
-        let f avm = CMW.tell "."
-        showValue (head vs) f
-        mapM_ (\v -> CMW.tell "," >> showValue v f) (tail vs)
-      CMW.tell ">"
-    ValIndex i -> CMW.tell $ "#"++show i
-
+-- | Pretty-print AVM with line-breaks and indentation
 ppAVM :: AVM -> String
 ppAVM avm = CMW.execWriter f
   where
@@ -350,9 +352,6 @@ ppAVM avm = CMW.execWriter f
     go l av | M.null av = putStr "[]"
     go l av = do
       putStr $ "["
-      -- case M.lookup (Attr "SORT") (avmBody avm) of
-      --   Just (ValAtom s) -> putStrLn $ (replicate l ' ') ++ ("[" ++ s)
-      --   _ -> return ()
       mapM_ (uncurry $ f (l+1)) $ zip [0..] (M.toList av)
       where
         f :: (CMW.MonadWriter String m) => Int -> Int -> (Attribute,Value) -> m ()
@@ -365,6 +364,61 @@ ppAVM avm = CMW.execWriter f
           if i+1 == M.size av
           then putStr "]"
           else putStrLn " "
+
+-- | Helper function for showing values, recursively
+--   `f` is the function applied to nested AVMs
+showValue :: (CMW.MonadWriter String m) => Value -> (AVM -> m ()) -> m ()
+showValue v f =
+  case v of
+    ValAVM avm ->
+      if M.size (avmDict avm) > 0
+      then error "Non-empty middle dictionary"
+      else f avm
+    ValAtom s  -> CMW.tell s
+    ValList vs -> do
+      CMW.tell "<"
+      if null vs
+      then return ()
+      else do
+        -- let f avm = CMW.tell "."
+        showValue (head vs) f
+        mapM_ (\v -> CMW.tell "," >> showValue v f) (tail vs)
+      CMW.tell ">"
+    ValIndex i -> CMW.tell $ "#"++show i
+
+-- | Pretty-print AVM in a single line
+inlineAVM :: AVM -> String
+inlineAVM avm = CMW.execWriter f
+  where
+    putStr s   = CMW.tell s
+
+    f :: (CMW.MonadWriter String m) => m ()
+    f = do
+      go (avmBody avm)
+      if M.size (avmDict avm) > 0
+      then do
+        putStr " where "
+        let dl = M.toList (avmDict avm)
+        mapM_ (\(i,(x,val)) -> do
+                               putStr $ show x ++ "="
+                               showValue val (CMW.tell . inlineAVM)
+                               if i < length dl then putStr ", " else return ()
+              ) (zip [1..] dl)
+      else return ()
+
+    go :: (CMW.MonadWriter String m) => AVMap -> m ()
+    go av | M.null av = putStr "[]"
+    go av = do
+      putStr $ "["
+      mapM_ (uncurry $ f) $ zip [0..] (M.toList av)
+      where
+        f :: (CMW.MonadWriter String m) => Int -> (Attribute,Value) -> m ()
+        f i (Attr a,v) = do
+          putStr $ a++" "
+          showValue v (\avm -> go (avmBody avm))
+          if i+1 == M.size av
+          then putStr "]"
+          else putStr ","
 
 ------------------------------------------------------------------------------
 -- Identity
@@ -380,6 +434,9 @@ typeIdentity a b = a == b
 tokenIdentity :: Value -> Value -> Bool
 tokenIdentity (ValIndex i1) (ValIndex i2) | i1 == i2 = True
 tokenIdentity _ _ = False
+
+(≐) = eq
+infix 4 ≐ -- same as ==
 
 -- | Equality that follows reentrants
 (~=) = eq
@@ -402,20 +459,20 @@ eq a b =
 
 -- | Unification
 --   Throws an error if unification fails
-(&) :: AVM -> AVM -> AVM
-(&) a b = case unify a b of
+(⊔) :: AVM -> AVM -> AVM
+(⊔) a b = case unify a b of
   Left err -> error err
   Right avm -> avm
 
-infixl 6 & -- same as +
+infixl 6 ⊔ -- same as +
 
 -- | Unifiable
-(&?) :: AVM -> AVM -> Bool
-(&?) a b = case unify a b of
+(⊔?) :: AVM -> AVM -> Bool
+(⊔?) a b = case unify a b of
   Left _ -> False
   Right _ -> True
 
-infix 4 &? -- same as <
+infix 4 ⊔? -- same as <
 
 -- | Unification, with helpful error messages
 unify :: AVM -> AVM -> Either String AVM
@@ -516,7 +573,7 @@ unify a1 a2 = do
         f :: (CME.MonadError String m) => Index -> Value -> Value -> m Value
         f k v1 v2 = if v1==v2
                     then return v1
-                    else CME.throwError $ printf "Conflict for key %s: %s and %s " (show k) (show v1) (show v2)
+                    else CME.throwError $ printf "Conflict for key %s: %s and %s " (show k) (show v1) (show v2) ++ "\n" ++ inlineAVM a1 ++ "\n" ++ inlineAVM a2
 
 -- | Unification for multi-AVMs
 munify :: MultiAVM -> MultiAVM -> Either String MultiAVM
@@ -532,16 +589,15 @@ munify a b | length (mavmBody a) /= length (mavmBody b) = Left "Multi-AVMs have 
 
 -- | Are two AVMs comparable for subsumption ("subsumable")?
 subsumable :: AVM -> AVM -> Bool
-subsumable a b = a |< b || a |> b
--- subsumable a b = a |< b || b |< a
+subsumable a b = a ⊑ b || a ⊒ b
 
-(|<) :: AVM -> AVM -> Bool
-(|<) = subsumes
-infix 4 |< -- same as <
+(⊑) :: AVM -> AVM -> Bool
+(⊑) = subsumes
+infix 4 ⊑ -- same as <
 
-(|>) :: AVM -> AVM -> Bool
-(|>) = flip subsumes
-infix 4 |> -- same as >
+(⊒) :: AVM -> AVM -> Bool
+(⊒) = flip subsumes
+infix 4 ⊒ -- same as >
 
 -- | AVMs may subsume eachother
 --   A subsumes B (A is more general than B)
@@ -581,10 +637,10 @@ msubsumes a b | length (mavmBody a) /= length (mavmBody b) = False
 -- Generalisation
 
 -- | Generalisation
-(|^|) :: AVM -> AVM -> AVM
-(|^|) = generalise
+(⊓) :: AVM -> AVM -> AVM
+(⊓) = generalise
 
-infixl 6 |^| -- same as +
+infixl 6 ⊓ -- same as +
 
 -- | Generalisation
 generalise :: AVM -> AVM -> AVM

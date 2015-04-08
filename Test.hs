@@ -21,75 +21,75 @@ prop_equality_commutative a b =
 --
 
 prop_subsumption_least :: AVM -> Bool
-prop_subsumption_least a = nullAVM |< a
+prop_subsumption_least a = nullAVM ⊑ a
 
 prop_subsumption_reflexive :: AVM -> Bool
-prop_subsumption_reflexive a = a |< a
+prop_subsumption_reflexive a = a ⊑ a
 
 prop_subsumption_transitive :: AVM -> AVM -> AVM -> Property
 prop_subsumption_transitive a b c =
-  (a |< b) && (b |< c) ==> a |< c
+  (a ⊑ b) && (b ⊑ c) ==> a ⊑ c
 
 prop_subsumption_antisymmetric :: AVM -> AVM -> Property
 prop_subsumption_antisymmetric a b =
-  (a |< b) && (b |< a) ==> a ~= b
+  (a ⊑ b) && (b ⊑ a) ==> a ~= b
 
 --
 
 prop_subsumes_implies_unifiable :: AVM -> AVM -> Property
 prop_subsumes_implies_unifiable a b =
-  a |< b ==> a &? b
+  a ⊑ b ==> a ⊔? b
 
 --
 
 prop_unification_idempotent :: AVM -> Bool
 prop_unification_idempotent a =
-  (a &? a) && (a & a ~= a)
+  (a ⊔? a) && (a ⊔ a ~= a)
 
 prop_unification_commutative :: AVM -> AVM -> Property
 prop_unification_commutative a b =
-  (a &? b) && (distinctDicts a b) ==> (b &? a) && (a & b ~= b & a)
+  (a ⊔? b) && (distinctDicts a b) ==> (b ⊔? a) && (a ⊔ b ~= b ⊔ a)
 
 prop_unification_associative :: AVM -> AVM -> AVM -> Property
 prop_unification_associative a b c =
   and
-    [ (a &? b)
-    , (b &? c)
-    , (a &? (b & c))
-    , ((a & b) &? c)
+    [ (a ⊔? b)
+    , (b ⊔? c)
+    , (a ⊔? (b ⊔ c))
+    , ((a ⊔ b) ⊔? c)
     , distinctDicts a b
     , distinctDicts a c
     , distinctDicts b c
-    ] ==> a & (b & c) ~= (a & b) & c
+    ] ==> a ⊔ (b ⊔ c) ~= (a ⊔ b) ⊔ c
 
 prop_unification_absorbing :: AVM -> AVM -> Property
 prop_unification_absorbing a b =
-  a |< b ==> a & b ~= b
+  a ⊑ b ==> a ⊔ b ~= b
 
 prop_unification_monotonic :: AVM -> AVM -> AVM -> Property
 prop_unification_monotonic a b c =
   and
-    [ a |< b
-    , a &? c
-    , b &? c
-    ] ==> (a & c) |< (b & c)
+    [ a ⊑ b
+    , a ⊔? c
+    , b ⊔? c
+    ] ==> (a ⊔ c) ⊑ (b ⊔ c)
 
 prop_unification_most_general :: AVM -> AVM -> Property
 prop_unification_most_general b c =
-  b &? c ==> let a = b & c in (b |< a) && (c |< a)
+  b ⊔? c ==> let a = b ⊔ c in (b ⊑ a) && (c ⊑ a)
 
 --
 
 prop_generalisation_idempotent :: AVM -> Bool
-prop_generalisation_idempotent a = (a |^| a ~= a)
+prop_generalisation_idempotent a = (a ⊓ a ~= a)
 
 prop_generalisation_commutative :: AVM -> AVM -> Property
 prop_generalisation_commutative a b =
-  (distinctDicts a b) ==> (a |^| b ~= b |^| a)
+  (distinctDicts a b) ==> (a ⊓ b ~= b ⊓ a)
 
 prop_generalisation_absorbing :: AVM -> AVM -> Property
 prop_generalisation_absorbing a b =
-  a |< b ==> a |^| b ~= a
+  a ⊑ b ==> a ⊓ b ~= a
 
 props = do
   let args = stdArgs
@@ -132,63 +132,63 @@ pp s avm = do
 -- cx_anti_symmetry = do
 --   let a = mkAVM [("C",ValNull)]
 --   let b = mkAVM [("C",vnullAVM)]
---   -- (a |< b) && (b |< a) ==> a ~= b
+--   -- (a ⊑ b) && (b ⊑ a) ==> a ~= b
 --   pp "a" a
 --   pp "b" b
---   assert $ a |< b
---   assert $ b |< a
+--   assert $ a ⊑ b
+--   assert $ b ⊑ a
 --   assert $ a ~= b
 
 -- cx_implies_unifiable = do
 --   let a = mkAVM' [("B",ValIndex 1)] [(1,ValList [])]
 --   let b = mkAVM  [("B",vmkAVM [("A",ValList [])] )]
---   -- a |< b ==> a &? b
+--   -- a ⊑ b ==> a ⊔? b
 --   pp "a" a
 --   pp "b" b
---   assert $ a |< b
---   assert $ a &? b
+--   assert $ a ⊑ b
+--   assert $ a ⊔? b
 
 -- cx_idempotency = do
 --   let a = mkAVM' [("B",ValIndex 2)] [(2,ValAtom "z")]
 --   pp "a" a
---   pp "a & a" $ a & a
---   assert $ a ~= a & a
+--   pp "a ⊔ a" $ a ⊔ a
+--   assert $ a ~= a ⊔ a
 
 -- cx_commutativity = do
 --   let a = mkAVM' [("C",ValIndex 5)] [(5,ValList [])]
 --   let b = mkAVM' [("C",ValIndex 3)] [(3,ValList [ValList [ValNull]])]
 --   pp "a" a
 --   pp "b" b
---   pp "a & b" $ a & b
---   pp "b & a" $ b & a
---   assert $ a & b ~= b & a
+--   pp "a ⊔ b" $ a ⊔ b
+--   pp "b ⊔ a" $ b ⊔ a
+--   assert $ a ⊔ b ~= b ⊔ a
 
 -- cx_absorption = do
 --   let a = mkAVM' [("C",ValIndex 1)] [(1,ValNull)]
 --   let b = mkAVM' [("B",ValList [vmkAVM [("B",ValIndex 1)]]),("C",ValNull)] [(1,ValAtom "x")]
 --   pp "a" a
 --   pp "b" b
---   pp "a & b" $ a & b
---   assert $ a |< b
---   assert $ a & b ~= b
+--   pp "a ⊔ b" $ a ⊔ b
+--   assert $ a ⊑ b
+--   assert $ a ⊔ b ~= b
 
 cx_monotonic = do
-  -- a |< b ==> (a & c) |< (b & c)
+  -- a ⊑ b ==> (a ⊔ c) ⊑ (b ⊔ c)
   let a = nullAVM
   let b = mkAVM [("B",ValList [])]
   let c = mkAVM [("B",vnullAVM)]
   pp "a" a
   pp "b" b
   pp "c" c
-  assert $ a |< b
-  assert $ a &? c
-  assert $ b &? c
-  pp "a & c" $ a & c
-  pp "b & c" $ b & c
-  assert $ (a & c) |< (b & c)
+  assert $ a ⊑ b
+  assert $ a ⊔? c
+  assert $ b ⊔? c
+  pp "a ⊔ c" $ a ⊔ c
+  pp "b ⊔ c" $ b ⊔ c
+  assert $ (a ⊔ c) ⊑ (b ⊔ c)
 
 cx_most_general = do
-  -- b &? c ==> let a = b & c in (b |< a) && (c |< a)
+  -- b ⊔? c ==> let a = b ⊔ c in (b ⊑ a) && (c ⊑ a)
   let b = mkAVM [("A",vnullAVM)]
   let c = mkAVM' [("A",ValIndex 4)] [(4,ValList [])]
 
@@ -198,14 +198,14 @@ cx_most_general = do
   --                [(1,vmkAVM [("A",ValAtom "y"),("B",ValIndex 1),("C",ValAtom "z")])]
   pp "b" b
   pp "c" c
-  putStrLn "b &? c"
-  print $ b &? c
-  let a = b & c
-  pp "a = b & c" $ a
-  putStrLn "b |< a"
-  print $ b |< a
-  putStrLn "c |< a"
-  print $ c |< a
+  putStrLn "b ⊔? c"
+  print $ b ⊔? c
+  let a = b ⊔ c
+  pp "a = b ⊔ c" $ a
+  putStrLn "b ⊑ a"
+  print $ b ⊑ a
+  putStrLn "c ⊑ a"
+  print $ c ⊑ a
 
 cx_merging_dicts = do
   let
@@ -217,18 +217,18 @@ cx_merging_dicts = do
         [ (1, vmkAVM1 "Y" (ValAtom "y")) ]
   pp "a" a
   pp "b" b
-  pp "a & b" (a & b)
+  pp "a ⊔ b" (a ⊔ b)
 
 -- cx_gen_absorption = do
---   -- a |< b ==> a |^| b ~= a
+--   -- a ⊑ b ==> a ⊓ b ~= a
 --   let
 --     a = mkAVM [("B",vnullAVM)]
 --     b = mkAVM [("B",vmkAVM [("C",ValList [])])]
 
 --   pp "a" a
 --   pp "b" b
---   print (a |< b)
---   pp "a |^| b" (a |^| b)
+--   print (a ⊑ b)
+--   pp "a ⊓ b" (a ⊓ b)
 
 ------------------------------------------------------------------------------
 -- Arbitrary instances
@@ -312,10 +312,10 @@ suite_sub = do
     num12 = mkAVM [("NUM1",ValAtom "sg"),("NUM2",ValAtom "sg")]
     num12' = mkAVM' [("NUM1",ValIndex 1),("NUM2",ValIndex 1)] [(1,ValAtom "sg")]
 
-  assert $ null |< num_sg
-  assert $ num_X |< num_sg
-  assert $ num_sg |< num_sg_per_3
-  assert $ num12 |< num12'
+  assert $ null ⊑ num_sg
+  assert $ num_X ⊑ num_sg
+  assert $ num_sg ⊑ num_sg_per_3
+  assert $ num12 ⊑ num12'
 
   assert $ not (subsumable num_sg num_pl)
   assert $ not (subsumable num_sg per_3)
@@ -359,14 +359,14 @@ suite_uni = do
            , ("SUBJECT"  ,vmkAVM1 "AGREEMENT" (vmkAVM1 "NUMBER" (ValAtom "sg"))) ]
     eg4b = mkAVM1 "SUBJECT" (vmkAVM1 "AGREEMENT" num_sg_per_p3)
 
-  assert $ (sg & sg) == sg
-  assert $ not (sg &? pl)
-  assert $ sg & nonum == sg
-  assert $ (sg & p3) == AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}
-  assert $ (eg1a & eg1b) == AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1),(Attr "SUBJECT",ValAVM (AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1)], avmDict = M.fromList []}))], avmDict = M.fromList [(1,ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}))]}
-  assert $ (eg2a & eg2b) == AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1),(Attr "SUBJECT",ValAVM (AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1)], avmDict = M.fromList []}))], avmDict = M.fromList [(1,ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}))]}
-  assert $ not (eg3a &? eg3b)
-  assert $ (eg4a & eg4b) == AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg")], avmDict = M.fromList []})),(Attr "SUBJECT",ValAVM (AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}))], avmDict = M.fromList []}))], avmDict = M.fromList []}
+  assert $ (sg ⊔ sg) == sg
+  assert $ not (sg ⊔? pl)
+  assert $ sg ⊔ nonum == sg
+  assert $ (sg ⊔ p3) == AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}
+  assert $ (eg1a ⊔ eg1b) == AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1),(Attr "SUBJECT",ValAVM (AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1)], avmDict = M.fromList []}))], avmDict = M.fromList [(1,ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}))]}
+  assert $ (eg2a ⊔ eg2b) == AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1),(Attr "SUBJECT",ValAVM (AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValIndex 1)], avmDict = M.fromList []}))], avmDict = M.fromList [(1,ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}))]}
+  assert $ not (eg3a ⊔? eg3b)
+  assert $ (eg4a ⊔ eg4b) == AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg")], avmDict = M.fromList []})),(Attr "SUBJECT",ValAVM (AVM {avmBody = M.fromList [(Attr "AGREEMENT",ValAVM (AVM {avmBody = M.fromList [(Attr "NUMBER",ValAtom "sg"),(Attr "PERSON",ValAtom "p3")], avmDict = M.fromList []}))], avmDict = M.fromList []}))], avmDict = M.fromList []}
 
 suite_uni_2 :: IO ()
 suite_uni_2 = do
@@ -379,14 +379,14 @@ suite_uni_2 = do
     aub = mkAVM' [ ("F",ValIndex 1)
                  , ("G",ValIndex 1) ]
                  [ (1, vmkAVM [("NUM", ValAtom "sg"), ("PERS", ValAtom "third")] )]
-  assert $ a & b == aub
+  assert $ a ⊔ b == aub
 
   let
     a = mkAVM [ ("F",ValIndex 1) ]
     b = mkAVM [ ("F",vmkAVM1 "H" (ValAtom "b")) ]
     aub = mkAVM' [ ("F",ValIndex 1) ]
                  [ (1, vmkAVM1 "H" (ValAtom "b")) ]
-  assert $ a & b == aub
+  assert $ a ⊔ b == aub
 
   let
     num_sg  = vmkAVM [("NUM",ValAtom "sg")]
@@ -402,8 +402,8 @@ suite_uni_2 = do
     a'ub = mkAVM' [ ("F",ValIndex 1)
                   , ("G",ValIndex 1) ]
                   [ (1,num_pers) ]
-  assert $ a & b == aub
-  assert $ a' & b == a'ub
+  assert $ a ⊔ b == aub
+  assert $ a' ⊔ b == a'ub
 
 suite_uni_bind :: IO ()
 suite_uni_bind = do
@@ -418,9 +418,9 @@ suite_uni_bind = do
                [ (2, per_3rd) ]
     aub = mkAVM' [ ("F",ValIndex 1) ]
                  [ (1, num_per) ]
-  -- putStrLn $ ppAVM $ a & b
+  -- putStrLn $ ppAVM $ a ⊔ b
   -- putStrLn $ ppAVM $ aub
-  assert $ a & b ~= aub
+  assert $ a ⊔ b ~= aub
 
 suite_gen :: IO ()
 suite_gen = do
@@ -435,19 +435,19 @@ suite_gen = do
     x = mkAVM' [("F",ValIndex 1),("G",ValIndex 1)] [(1,ValAVM num_sg)]
     y = mkAVM [("F",ValAVM num_sg),("G",ValAVM num_sg)]
 
-  assert $ num_sg |^| per_3rd ~= nullAVM
-  assert $ num_sg |^| num_pl ~= nullAVM
-  assert $ num_sg |^| num_per ~= num_sg
-  assert $ nullAVM |^| agr_num_sg ~= nullAVM
-  assert $ x |^| y ~= y
+  assert $ num_sg ⊓ per_3rd ~= nullAVM
+  assert $ num_sg ⊓ num_pl ~= nullAVM
+  assert $ num_sg ⊓ num_per ~= num_sg
+  assert $ nullAVM ⊓ agr_num_sg ~= nullAVM
+  assert $ x ⊓ y ~= y
 
 suite_val :: IO()
 suite_val = do
   let
     mavm = mkMultiAVM
-             [ mkAVM [("F",vmkAVM [("G", ValAtom "a"),("H", ValIndex 1)])]
-             , mkAVM [("G",ValIndex 2)]
-             , mkAVM [("F",vmkAVM [("H", ValAtom "b"),("G", ValIndex 1)]), ("H",ValAtom "a")]
+             [ vmkAVM [("F",vmkAVM [("G", ValAtom "a"),("H", ValIndex 1)])]
+             , vmkAVM [("G",ValIndex 2)]
+             , vmkAVM [("F",vmkAVM [("H", ValAtom "b"),("G", ValIndex 1)]), ("H",ValAtom "a")]
              ]
     v :: Int -> [String] -> Value
     v i as = fromJust $ mval mavm i (map Attr as)
