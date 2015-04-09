@@ -117,6 +117,11 @@ tryResolve dict v = case v of
     Nothing -> vnullAVM -- default value when unbound
     Just x -> x
 
+-- | Convert Haskell list to AVM-list
+unlist :: [Value] -> Value
+unlist [] = ValAtom "elist"
+unlist (l:ls) = vmkAVM [("FIRST",l),("REST",unlist ls)]
+
 -- | Remove an attribute from an AVM
 --   Only works one level deep
 --   Does not follow indices
@@ -195,6 +200,18 @@ mergeDicts = M.unionWithKey f
     f k v1 v2 = if v1==v2
                 then v1
                 else error $ printf "mergeDicts: Conflict for key %s: %s and %s " (show k) (show v1) (show v2)
+
+-- | Merge dict of second AVM into the first one
+mergeAVMDicts :: AVM -> AVM -> AVM
+mergeAVMDicts a b = AVM (avmBody a) (mergeDicts (avmDict a) (avmDict b))
+
+-- | Can two dictionaries be merged?
+canMergeDicts :: Dict -> Dict -> Bool
+canMergeDicts a b = all snd $ M.toList $ M.intersectionWith (==) a b
+
+-- | Can the dictionaries of two AVMs be merged?
+canMergeAVMDicts :: AVM -> AVM -> Bool
+canMergeAVMDicts a b = canMergeDicts (avmDict a) (avmDict b)
 
 -- -- | Go over AVM and clear middle dictionaries.
 -- --   This involves pushing them up to the top level, possibly with renaming.
@@ -338,15 +355,7 @@ ppAVM avm = CMW.execWriter f
     f = do
       go 0 (avmBody avm)
       CMW.tell "\n"
-      if M.size (avmDict avm) > 0
-      then do
-        putStrLn "where"
-        mapM_ (\(i,val) -> do
-                               putStr $ show i ++ " = "
-                               showValue val (CMW.tell . ppAVM)
-                               putStr "\n"
-              ) (M.toList $ avmDict avm)
-      else return ()
+      ppDict (avmDict avm) False
 
     go :: (CMW.MonadWriter String m) => Int -> AVMap -> m ()
     go l av | M.null av = putStr "[]"
@@ -359,11 +368,41 @@ ppAVM avm = CMW.execWriter f
           if i > 0
           then putStr $ replicate l' ' '
           else return ()
-          putStr $ a++":"
+          putStr $ a++" "
           showValue v (\avm -> go (l'+(length a)+1) (avmBody avm))
           if i+1 == M.size av
           then putStr "]"
           else putStrLn " "
+
+-- | Pretty-print a dictionary, either inline or not
+ppDict :: (CMW.MonadWriter String m) => Dict -> Bool -> m ()
+ppDict dict _ | M.size dict == 0 = return ()
+ppDict dict inline = do
+  let
+    putStr s   = CMW.tell s
+    putStrLn s = CMW.tell (s++"\n")
+    dl = M.toList dict
+    f (i,(x,val)) =
+      if inline
+      then do
+        putStr $ show x ++ "="
+        showValue val (CMW.tell . inlineAVM)
+        if i < length dl then putStr ", " else return ()
+      else do
+        putStr $ " " ++ show x ++ ": "
+        showValue val (CMW.tell . inlineAVM)
+        if i < length dl then putStr "\n" else return ()
+  if inline then putStr " where " else putStrLn "where"
+  mapM_ f (zip [1..] dl)
+
+-- | Pretty-print a MultiAVM
+ppMAVM :: MultiAVM -> String
+ppMAVM mavm = CMW.execWriter f
+  where
+    f :: (CMW.MonadWriter String m) => m ()
+    f = do
+      CMW.tell $ unlines $ map ppAVM (unMultiAVM mavm)
+      ppDict (mavmDict mavm) False
 
 -- | Helper function for showing values, recursively
 --   `f` is the function applied to nested AVMs
@@ -395,16 +434,7 @@ inlineAVM avm = CMW.execWriter f
     f :: (CMW.MonadWriter String m) => m ()
     f = do
       go (avmBody avm)
-      if M.size (avmDict avm) > 0
-      then do
-        putStr " where "
-        let dl = M.toList (avmDict avm)
-        mapM_ (\(i,(x,val)) -> do
-                               putStr $ show x ++ "="
-                               showValue val (CMW.tell . inlineAVM)
-                               if i < length dl then putStr ", " else return ()
-              ) (zip [1..] dl)
-      else return ()
+      ppDict (avmDict avm) True
 
     go :: (CMW.MonadWriter String m) => AVMap -> m ()
     go av | M.null av = putStr "[]"
