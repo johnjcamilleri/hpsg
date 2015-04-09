@@ -54,90 +54,67 @@ ppTree = go 0
 ------------------------------------------------------------------------------
 -- Actual parse function
 
--- Stupid, brute-force parsing
-parse :: Grammar -> [Token] -> [DerivationTree]
-parse g ts = undefined
+-- | Stupid, brute-force parsing
+parse :: Grammar -> String -> IO ()
+parse g s = mapM_ pp $ parse' g (words s)
 
+-- | Stupid, brute-force parsing
+parse' :: Grammar -> [Token] -> [DerivationTree]
+parse' g ts = [ tree | tree <- allTrees g, lin tree == ts]
 
--- Given [[a,b],[c],[d,e,f]] returns [[a,c,d],[a,c,e],[a,c,f],[b,c,d],[b,c,e],[b,c,f]]
-combos :: [[a]] -> [[a]]
-combos as =
-  case as of
-    [a] -> [ [x] | x <- a ] -- given [[a,b]] returns [[a],[b]]
-    (a:b:rest) -> foldl fo (go a b) rest
-  where
-    -- Given [a,b] [1,2] returns [[a,1],[a,2],[b,1],[b,2]]
-    go :: [a] -> [a] -> [[a]]
-    go xs ys = [[x,y] | x<-xs, y<-ys]
-
-    -- Given [[a,b],[c,d]] [1,2] returns [[a,b,1],[c,d,1],[a,b,2],[c,d,2]]
-    fo :: [[a]] -> [a] -> [[a]]
-    fo xss ys = [ xs++[y] | xs<-xss, y<-ys]
-
+-- | Enumerate all valid derivation trees from a grammar
+--   May not terminate
 allTrees :: Grammar -> [DerivationTree]
-allTrees g = go g (mkAVM1 "CAT" (ValAtom $ start g))
-  -- where
-go :: Grammar -> AVM -> [DerivationTree]
-go g avm =
-  -- These two lists should be disjoint...
-  -- concat
-  --   [ [ Node (foldl (\b (Node a _) -> b ⊔- a) (toAVM mavm 1) kids) kids
-  --     | kids :: [DerivationTree] <- combos $ map (go g) (tail $ unMultiAVM mavm)
-  --     ]
-  --   | Rule mavm <- rs
-  --   ]
-  concat rs2
-  ++ [ Node (avm ⊔ avm') [Leaf tok] | Terminal tok avm' <- ts ]
+allTrees g = go (mkAVM1 "CAT" (ValAtom $ start g))
   where
-    -- Get matching rules
-    -- rs :: [Rule] = filter fr (rules g)
-    -- fr (Rule mavm') = toAVM mavm' 1 ⊔? avm
-    -- fr _ = False
-
-    -- TODO: something wrong here
-    -- Test with: mapM_ pp $ go g1 (mkAVM1 "CAT" (ValAtom "np"))
-    rs2 :: [[DerivationTree]] = filtermap fr2 (rules g)
-    fr2 :: (Rule -> Maybe [DerivationTree])
-    fr2 (Rule mavm) =
-      if toAVM mavm 1 ⊔? avm && unifa
-      then Just [ Node (unifyKids par kids) kids | kids <- kidss ]
-      else Nothing
+    go :: AVM -> [DerivationTree]
+    go avm = concat rs2 ++ ts2 -- these two lists should be disjoint
       where
-        par = toAVM mavm 1 ⊔ avm -- new parent
-        kidss :: [[DerivationTree]] = combos $ map (go g) (tail $ unMultiAVM mavm)
-        unifa = and [ unifiableKids par kids | kids :: [DerivationTree] <- kidss ]
-    fr2 _ = Nothing
+        -- Get matching rules (recurses)
+        rs2 :: [[DerivationTree]] = filtermap fr2 (rules g)
+        fr2 :: (Rule -> Maybe [DerivationTree])
+        fr2 (Rule mavm) =
+          if toAVM mavm 1 ⊔? avm
+          then Just [ Node (unifyKids par kids) kids | kids <- kidss, unifiableKids par kids ]
+          else Nothing
+          where
+            par = toAVM mavm 1 ⊔ avm -- new parent
+            kidss :: [[DerivationTree]] = combos $ map go (tail $ unMultiAVM mavm)
+        fr2 _ = Nothing
 
-    -- Get matching terminals
-    -- TODO: can be rewritten as single function as above
-    ts :: [Rule] = filter ft (rules g)
-    ft (Terminal _ avm') = avm ⊔? avm'
-    ft _ = False
+        -- Get matching terminals
+        ts2 :: [DerivationTree] = filtermap ft2 (rules g)
+        ft2 :: (Rule -> Maybe DerivationTree)
+        ft2 (Terminal tok avm') =
+          if avm ⊔? avm'
+          then Just $ Node (avm ⊔ avm') [Leaf tok]
+          else Nothing
+        ft2 _ = Nothing
 
-    -- All these kids are unifiable with parent
+    -- Are all these kids unifiable with parent?
     unifiableKids :: AVM -> [DerivationTree] -> Bool
     unifiableKids avm kids = fst $ foldl (\(t,b) (Node a _) -> (t && b ⊔-? a, b ⊔- a)) (True,avm) kids
 
+    -- Unify all these kids with parent
     unifyKids :: AVM -> [DerivationTree] -> AVM
     unifyKids avm kids = foldl (\b (Node a _) -> b ⊔- a) avm kids
 
--- | Unification, ignoring CAT category (retaining first)
-(⊔-) :: AVM -> AVM -> AVM
-(⊔-) a b = addAttr a'' (a' ⊔ b')
-  where
-    (a',a'') = remAttr (Attr "CAT") a
-    (b',_  ) = remAttr (Attr "CAT") b
-(⊔-?) :: AVM -> AVM -> Bool
-(⊔-?) a b = a' ⊔? b'
-  where
-    (a',_) = remAttr (Attr "CAT") a
-    (b',_) = remAttr (Attr "CAT") b
+    -- Unification, ignoring CAT category (retaining first)
+    (⊔-) :: AVM -> AVM -> AVM
+    (⊔-) a b = addAttr a'' (a' ⊔ b')
+      where
+        (a',a'') = remAttr (Attr "CAT") a
+        (b',_  ) = remAttr (Attr "CAT") b
 
-    -- just for debugging purposes
-    (⊔?!) a b = case unify a b of
-      Left err -> error err
-      Right avm -> True
+    -- Unifiable ignoring CAT category
+    (⊔-?) :: AVM -> AVM -> Bool
+    (⊔-?) a b = a' ⊔? b'
+      where
+        (a',_) = remAttr (Attr "CAT") a
+        (b',_) = remAttr (Attr "CAT") b
 
+-- | Get linearisation from derivation tree
+--   May include holes if tree is incomplete
 lin :: DerivationTree -> [Token]
 lin (Leaf tok) = [tok]
 lin (Node _ []) = ["?"]
@@ -170,14 +147,16 @@ g1 = Grammar "s"
      , Rule $ mkMultiAVM [ cat "vp" numX
                          , cat "v" numX
                          ]
-     -- , Rule $ mkMultiAVM [ cat "vp" numX
-     --                     , cat "v" numX
-     --                     , cat "np" numY
-     --                     ]
+     , Rule $ mkMultiAVM [ cat "vp" numX
+                         , cat "v" numX
+                         , cat "np" numY
+                         ]
 
        -- Terminals
      , Terminal "lamb" $ term "n" ⊔ numSG
-     -- , Terminal "sheep" $ term "n" ⊔ numSG
+     , Terminal "lambs" $ term "n" ⊔ numPL
+     , Terminal "sheep" $ term "n" ⊔ numSG
+     , Terminal "sheep" $ term "n" ⊔ numPL
 
      , Terminal "sleeps" $ term "v" ⊔ numSG
      , Terminal "sleep" $ term "v" ⊔ numPL
