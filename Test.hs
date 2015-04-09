@@ -450,7 +450,7 @@ suite_val = do
              , vmkAVM [("F",vmkAVM [("H", ValAtom "b"),("G", ValIndex 1)]), ("H",ValAtom "a")]
              ]
     v :: Int -> [String] -> Value
-    v i as = fromJust $ mval mavm i (map Attr as)
+    v i as = fromJust $ mval (map Attr as) mavm i
 
   assert $ (v 1 ["F"]) == (vmkAVM [("G", ValAtom "a"),("H", vnullAVM)])
   assert $ (v 3 ["F"]) == (vmkAVM [("H", ValAtom "b"),("G", vnullAVM)])

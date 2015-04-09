@@ -85,16 +85,16 @@ toAVM mavm i = AVM (body) (mavmDict mavm)
 
 -- | val function as defined in
 --   http://cs.haifa.ac.il/~shuly/teaching/06/nlp/ug1.pdf
-val :: AVM -> Path -> Maybe Value
-val avm []  = Nothing
-val avm [a] = val' avm a
-val avm (a:as) = case val' avm a of
-  Just (ValAVM avm) -> val avm as
+val :: Path -> AVM -> Maybe Value
+val [] avm = Nothing
+val [a] avm = val' a avm
+val (a:as) avm = case val' a avm of
+  Just (ValAVM avm) -> val as avm
   _ -> Nothing
 
 -- | Val for a single attribute
-val' :: AVM -> Attribute -> Maybe Value
-val' avm a = fmap (tryResolve (avmDict avm)) (M.lookup a (avmBody avm))
+val' :: Attribute -> AVM -> Maybe Value
+val' a avm = fmap (tryResolve (avmDict avm)) (M.lookup a (avmBody avm))
 -- val' avm a = case M.lookup a (avmBody avm) of
 --     Just (ValIndex i) -> case lookupAVM i avm of
 --       Nothing -> Just vnullAVM
@@ -103,8 +103,8 @@ val' avm a = fmap (tryResolve (avmDict avm)) (M.lookup a (avmBody avm))
 
 -- | val extended for multi-AVMs
 --   Indexes start from 1
-mval :: MultiAVM -> Int -> Path -> Maybe Value
-mval mavm i = val (toAVM mavm i)
+mval :: Path -> MultiAVM -> Int -> Maybe Value
+mval p mavm i = val p (toAVM mavm i)
 
 -- | Recurse through values and try to resolve indices, filling with nullAVM where not bound
 --   This seems to be the desired behaviour of the val function
@@ -121,6 +121,14 @@ tryResolve dict v = case v of
 unlist :: [Value] -> Value
 unlist [] = ValAtom "elist"
 unlist (l:ls) = vmkAVM [("FIRST",l),("REST",unlist ls)]
+
+-- | Convert AVM-list to Haskell list
+--   Throws error if not well-formed
+tolist :: Value -> [Value]
+tolist (ValAtom "elist") = []
+tolist (ValAVM avm) = v "FIRST" avm : tolist (v "REST" avm)
+  where
+    v s = fromJust . val [Attr s]
 
 -- | Remove an attribute from an AVM
 --   Only works one level deep
@@ -266,7 +274,7 @@ paths avm = go avm []
 
 -- | Are two paths reentrant in an AVM?
 reentrant :: AVM -> Path -> Path -> Bool
-reentrant avm p1 p2 = val avm p1 == val avm p2
+reentrant avm p1 p2 = val p1 avm == val p2 avm
 
 ------------------------------------------------------------------------------
 -- Builders
