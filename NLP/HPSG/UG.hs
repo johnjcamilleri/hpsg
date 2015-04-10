@@ -7,6 +7,11 @@ module NLP.HPSG.UG where
 import Common
 
 import NLP.HPSG.AVM
+
+import Data.Maybe (catMaybes)
+import qualified Data.Map as M
+import qualified Data.List as L
+
 import Debug.Trace (trace)
 
 data Grammar = Grammar {
@@ -68,15 +73,12 @@ parse' ts g d = [ tree | tree <- allTrees g d, lin tree == ts]
 
 -- | Enumerate all valid derivation trees from a grammar, up to a certain depth
 allTrees :: Grammar -> Int -> [DerivationTree]
-allTrees g depth = go 0 (mkAVM1 "CAT" (ValAtom $ start g))
+allTrees g depth = allTrees' (mkAVM1 "CAT" (ValAtom $ start g)) g depth
 
--- TEMP
--- allTrees g depth = go 0 (mkAVM [("CAT",ValAtom "v"),("SUBCAT",vnullAVM)])
--- allTrees g depth = go 0 (mkAVM [("CAT",ValAtom "v"),("SUBCAT", unlist [vmkAVM1 "CAT" (ValIndex 1), vmkAVM1 "CAT" (ValIndex 1)])])
--- allTrees g depth = go 0 (mkAVM [("CAT",ValAtom "v"),("SUBCAT",(vmkAVM [("FIRST", vmkAVM1 "CAT" (ValIndex 1)), ("REST",ValIndex 2)]))])
+allTrees' :: AVM -> Grammar -> Int -> [DerivationTree]
+allTrees' avm g depth = go 0 avm
   where
     go :: Int -> AVM -> [DerivationTree]
-    go d avm | d >= depth = []
     go d avm = concat drvs
       where
         drvs :: [[DerivationTree]] = filtermap f (rules g)
@@ -84,46 +86,89 @@ allTrees g depth = go 0 (mkAVM1 "CAT" (ValAtom $ start g))
 
         -- Get matching rules (recurses)
         f (Rule mavm) =
-          if avm ⊔? lhs
-          then Just [ Node (unifyKids par kids) kids | kids <- kidss, unifiableKids par kids ]
+          if avm ⊔? lhs -- OK
+          then Just [ Node (mergeKids par kids) (cleanKids rs kids) | kids <- kidss, compatibleKids par kids ]
           else Nothing
           where
             lhs = toAVM mavm 1
             rhs = tail $ unMultiAVM mavm
-            par = lhs ⊔ avm -- new parent
-            kidss :: [[DerivationTree]] = combos $ map (go (d+1)) rhs
+            par = avm ⊔ lhs -- new parent
+            rs = repls lhs par -- index replacements from above unification
+            kidss :: [[DerivationTree]] =
+              if d >= depth-1
+              then combos $ [ [Node ravm []] | ravm <- rhs ]
+              else combos $ map (go (d+1)) rhs
 
         -- Get matching terminals
         f (Terminal tok lhs) =
           if avm ⊔? lhs
-          then Just [ Node (avm ⊔ lhs) [Leaf tok] ]
+          then Just [ Node par [Leaf tok] ]
           else Nothing
-
-    -- TODO: Still unsure if we want full unification here or just dict merging
+          where
+            par = avm ⊔ lhs -- new parent
 
     -- Are all these kids unifiable with parent?
-    unifiableKids :: AVM -> [DerivationTree] -> Bool
-    unifiableKids avm kids = fst $ foldl (\(t,b) (Node a _) -> (t && b ⊔-? a, b ⊔- a)) (True,avm) kids
-    -- unifiableKids avm kids = fst $ foldl (\(t,b) (Node a _) -> (t && canMergeAVMDicts b a, mergeAVMDicts b a)) (True,avm) kids
+    -- unifiableKids :: AVM -> [DerivationTree] -> Bool
+    -- unifiableKids avm kids = fst $ foldl (\(t,b) (Node a _) -> (t && b ⊔-? a, b ⊔- a)) (True,avm) kids
+    -- unifiableKids avm kids = all (\(Node a _) -> (avm ⊔-? a)) kids
 
-    -- Unify all these kids with parent
-    unifyKids :: AVM -> [DerivationTree] -> AVM
-    unifyKids avm kids = foldl (\b (Node a _) -> b ⊔- a) avm kids
-    -- unifyKids avm kids = foldl (\b (Node a _) -> mergeAVMDicts b a) avm kids
+    -- -- Unify all these kids with parent
+    -- unifyKids :: AVM -> [DerivationTree] -> AVM
+    -- unifyKids avm kids = foldl (\b (Node a _) -> b ⊔- a) avm kids
 
-    -- Unification, ignoring CAT category (retaining first)
-    (⊔-) :: AVM -> AVM -> AVM
-    (⊔-) a b = addAttr a'' (a' ⊔ b')
-      where
-        (a',a'') = remAttr (Attr "CAT") a
-        (b',_  ) = remAttr (Attr "CAT") b
+    -- Are all these kids compatible with parent?
+    compatibleKids :: AVM -> [DerivationTree] -> Bool
+    compatibleKids avm kids = fst $ foldl (\(t,b) (Node a _) -> (t && canMergeAVMDicts b a, mergeAVMDicts b a)) (True,avm) kids
 
-    -- Unifiable ignoring CAT category
-    (⊔-?) :: AVM -> AVM -> Bool
-    (⊔-?) a b = a' ⊔? b'
-      where
-        (a',_) = remAttr (Attr "CAT") a
-        (b',_) = remAttr (Attr "CAT") b
+    -- Merge these kids with parent (dictionaries)
+    mergeKids :: AVM -> [DerivationTree] -> AVM
+    mergeKids avm kids = foldl (\b (Node a _) -> mergeAVMDicts b a) avm kids
+
+    -- Clean dictionaries of kids
+    cleanKids :: M.Map Index Index -> [DerivationTree] -> [DerivationTree]
+    cleanKids rs kids = [ Node (replaceIndices rs $ cleanDict avm) ks | Node avm ks <- kids ]
+
+    -- -- Unification, ignoring CAT category (retaining first)
+    -- (⊔-) :: AVM -> AVM -> AVM
+    -- (⊔-) a b = addAttr a'' (a' ⊔ b')
+    --   where
+    --     (a',a'') = remAttr (Attr "CAT") a
+    --     (b',_  ) = remAttr (Attr "CAT") b
+
+    -- -- Unifiable ignoring CAT category
+    -- (⊔-?) :: AVM -> AVM -> Bool
+    -- (⊔-?) a b = a' ⊔? b'
+    --   where
+    --     (a',_) = remAttr (Attr "CAT") a
+    --     (b',_) = remAttr (Attr "CAT") b
+
+-- | Given two AVMs, try to figure out which indices where renamed
+--   This would be best generated during unification, but i'm hoping this is a quick fix
+--   Note the "direction" of the arguments
+repls :: AVM -> AVM -> M.Map Index Index
+repls a1 a2 = M.fromList $ L.nub $ catMaybes $ map f (paths a1)
+  where
+    f :: Path -> Maybe (Index, Index)
+    f p = case (val p a1, val p a2) of
+      (Just (ValIndex i1), Just (ValIndex i2)) -> if i1 /= i2 then Just (i1,i2) else Nothing
+      _ -> Nothing
+    -- Our own version of val which doesn't follow indices
+    val :: Path -> AVM -> Maybe Value
+    val [] avm = Nothing
+    val [a] avm = val' a avm
+    val (a:as) avm = case val' a avm of
+      Just (ValAVM avm') -> val as avm'
+      _ -> Nothing
+    val' a avm = M.lookup a (avmBody avm)
+
+-- test = do
+--   let
+--     avm1 = mkAVM [("CAT",ValAtom "np"),("NUM",ValIndex 3)] `addDict` [(3,ValAtom "pl")]
+--     avm2 = mkAVM [("NUM",ValIndex 2)]
+--     u = avm1 ⊔ avm2
+--   putStrLn $ inlineAVM avm2
+--   putStrLn $ inlineAVM u
+--   print $ repls avm2 u
 
 -- | Get linearisation from derivation tree
 --   May include holes if tree is incomplete
@@ -162,9 +207,9 @@ g1 = Grammar "s"
                          , cat "d" numX
                          , cat "n" numX
                          ]
-     , Rule $ mkMultiAVM [ cat "vp" numX
-                         , cat "v" numX
-                         ]
+     -- , Rule $ mkMultiAVM [ cat "vp" numX
+     --                     , cat "v" numX
+     --                     ]
      , Rule $ mkMultiAVM [ cat "vp" numX
                          , cat "v" numX
                          , cat "np" numY
@@ -204,51 +249,17 @@ g2 = Grammar "s"
                          ]
 
      , Terminal "John" $ term "np"
-     , Terminal "Mary" $ term "np"
-     , Terminal "Rachel" $ term "np"
-     , Terminal "sleeps" $ term "v" ⊔ subcats 0
+     -- , Terminal "Mary" $ term "np"
+     -- , Terminal "Rachel" $ term "np"
+     -- , Terminal "sleeps" $ term "v" ⊔ subcats 0
      , Terminal "loves"  $ term "v" ⊔ subcats 1
      , Terminal "gives"  $ term "v" ⊔ subcats 2
-
+     -- , Terminal "tells"  $ term "v" ⊔ mkAVM1 "SUBCAT" (unlist [vmkAVM1 "CAT" (ValAtom "np"), vmkAVM1 "CAT" (ValAtom "s")])
      ]
      where
        subcats n = mkAVM1 "SUBCAT" (unlist (replicate n (vmkAVM1 "CAT" (ValAtom "np"))))
        cat c = mkAVM1 "CAT" (ValAtom c)
        term c = mkAVM1 "CAT" (ValAtom c)
-
--- test :: IO ()
--- test = do
---   let
---     avm = cat "s"
-
---     cat c = mkAVM1 "CAT" (ValAtom c)
---     term c = mkAVM1 "CAT" (ValAtom c)
---     rules = [ Rule $ mkMultiAVM [ ValAVM $ avm10
---                                 , ValAVM $ avm11
---                                 , ValAVM $ avm12
---                                 ]
---             , Rule $ mkMultiAVM [ ValAVM $ avm20
---                                 , ValAVM $ avm21
---                                 , ValAVM $ avm22
---                                 ]
-
---             , Terminal "Rachel" $ term "np"
---             , Terminal "the-sheep" $ term "np"
---             , Terminal "some-hay" $ term "np"
---             , Terminal "gave" $ term "v"
---             ]
---     avm10 = cat "s"
---     avm11 = cat "np"
---     avm12 = cat "v" ⊔ mkAVM1 "SUBCAT" (unlist [])
-
---     avm20 = cat "v" ⊔ mkAVM1 "SUBCAT" (ValIndex 2)
---     avm21 = cat "v" ⊔ mkAVM1 "SUBCAT" (vmkAVM [("FIRST", vmkAVM1 "CAT" (ValIndex 1)), ("REST",ValIndex 2)])
---     avm22 = mkAVM1 "CAT" (ValIndex 1)
-
---     par = avm12 ⊔ avm20
-
---   print $ par ⊔? avm21
---   -- putStrLn $ ppAVM $ avm12 ⊔ avm20
 
 -- Adds case
 g3 :: Grammar

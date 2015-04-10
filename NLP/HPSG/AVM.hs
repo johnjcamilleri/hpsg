@@ -95,7 +95,7 @@ val (a:as) avm = case val' a avm of
 -- | Val for a single attribute
 val' :: Attribute -> AVM -> Maybe Value
 val' a avm = fmap (tryResolve (avmDict avm)) (M.lookup a (avmBody avm))
--- val' avm a = case M.lookup a (avmBody avm) of
+-- val' a avm = case M.lookup a (avmBody avm) of
 --     Just (ValIndex i) -> case lookupAVM i avm of
 --       Nothing -> Just vnullAVM
 --       x -> x
@@ -129,6 +129,14 @@ tolist (ValAtom "elist") = []
 tolist (ValAVM avm) = v "FIRST" avm : tolist (v "REST" avm)
   where
     v s = fromJust . val [Attr s]
+
+-- | Is an AVM actually an encoded list?
+islist :: Value -> Bool
+islist (ValAtom "elist") = True
+islist (ValAVM avm) = L.sort (M.keys (avmBody avm)) == [Attr "FIRST", Attr "REST"] && islist (v "REST" avm)
+  where
+    v s = fromJust . val [Attr s]
+islist _ = False
 
 -- | Remove an attribute from an AVM
 --   Only works one level deep
@@ -205,9 +213,21 @@ mergeDicts :: Dict -> Dict -> Dict
 mergeDicts = M.unionWithKey f
   where
     f :: Index -> Value -> Value -> Value
-    f k v1 v2 = if v1==v2
-                then v1
-                else error $ printf "mergeDicts: Conflict for key %s: %s and %s " (show k) (show v1) (show v2)
+    f k v1 v2 = case mergeValues v1 v2 of
+      Just v -> v
+      Nothing -> error $ printf "mergeDicts: Conflict for key %s: %s and %s " (show k) (show v1) (show v2)
+
+-- | Inner function for merging values
+--   This should be used by all dict merges
+mergeValues :: Value -> Value -> Maybe Value
+mergeValues v1 v2 | v1 == vnullAVM = Just v2
+mergeValues v1 v2 | v2 == vnullAVM = Just v1
+mergeValues v1 v2 = if v1==v2
+                    then Just v1
+                    else Nothing
+
+mergeValuesWithKey :: a -> Value -> Value -> Maybe Value
+mergeValuesWithKey _ v1 v2 = mergeValues v1 v2
 
 -- | Merge dict of second AVM into the first one
 mergeAVMDicts :: AVM -> AVM -> AVM
@@ -215,11 +235,19 @@ mergeAVMDicts a b = AVM (avmBody a) (mergeDicts (avmDict a) (avmDict b))
 
 -- | Can two dictionaries be merged?
 canMergeDicts :: Dict -> Dict -> Bool
-canMergeDicts a b = all snd $ M.toList $ M.intersectionWith (==) a b
+canMergeDicts a b = all snd $ M.toList $ M.intersectionWith f a b
+  where
+    f :: Value -> Value -> Bool
+    f v1 v2 = isJust $ mergeValues v1 v2
 
 -- | Can the dictionaries of two AVMs be merged?
 canMergeAVMDicts :: AVM -> AVM -> Bool
 canMergeAVMDicts a b = canMergeDicts (avmDict a) (avmDict b)
+
+-- | Clear dictionary of an AVM
+--   Should be done after merging upwards
+cleanDict :: AVM -> AVM
+cleanDict avm = AVM (avmBody avm) M.empty
 
 -- -- | Go over AVM and clear middle dictionaries.
 -- --   This involves pushing them up to the top level, possibly with renaming.
@@ -247,14 +275,27 @@ canMergeAVMDicts a b = canMergeDicts (avmDict a) (avmDict b)
 --       return $ ValList vs'
 --     f v = return v
 
+-- -- | Rename/replace indices
+-- replaceIndices :: M.Map Index Index -> AVMap -> AVMap
+-- replaceIndices rs = M.map f
+--   where
+--     f :: Value -> Value
+--     f v = case v of
+--       ValIndex i -> ValIndex $ rs M.! i
+--       ValList vs -> ValList $ map f vs
+--       _ -> v
+
 -- | Rename/replace indices
-replaceIndices :: M.Map Index Index -> AVMap -> AVMap
-replaceIndices rs = M.map f
+replaceIndices :: M.Map Index Index -> AVM -> AVM
+replaceIndices rs avm = AVM body' dict'
   where
+    dict' = M.mapKeys (\k1 -> case M.lookup k1 rs of Just k2 -> k2 ; Nothing -> k1) (avmDict avm)
+    body' = M.map f (avmBody avm)
     f :: Value -> Value
     f v = case v of
-      ValIndex i -> ValIndex $ rs M.! i
+      ValIndex i -> ValIndex $ M.findWithDefault i i rs
       ValList vs -> ValList $ map f vs
+      ValAVM avm -> ValAVM $ replaceIndices rs avm
       _ -> v
 
 -- | Return all paths in an AVM
@@ -415,6 +456,7 @@ ppMAVM mavm = CMW.execWriter f
 -- | Helper function for showing values, recursively
 --   `f` is the function applied to nested AVMs
 showValue :: (CMW.MonadWriter String m) => Value -> (AVM -> m ()) -> m ()
+showValue v f | islist v = showValue (ValList (tolist v)) f
 showValue v f =
   case v of
     ValAVM avm ->
@@ -499,9 +541,8 @@ eq a b =
 --   Throws an error if unification fails
 (⊔) :: AVM -> AVM -> AVM
 (⊔) a b = case unify a b of
-  Left err -> error err
+  Left err -> error $ "unify: "++err
   Right avm -> avm
-
 infixl 6 ⊔ -- same as +
 
 -- | Unifiable
@@ -509,7 +550,6 @@ infixl 6 ⊔ -- same as +
 (⊔?) a b = case unify a b of
   Left _ -> False
   Right _ -> True
-
 infix 4 ⊔? -- same as <
 
 -- | Unification, with helpful error messages
@@ -519,7 +559,7 @@ unify a1 a2 = do
   -- then CME.throwError "I don't want to unify AVMs with intersecting indices"
   -- else return nullAVM
 
-  dict <- dictMerge (avmDict a1) (avmDict a2)
+  dict <- mergeDictsM (avmDict a1) (avmDict a2)
   (body, dict2) <- CMS.runStateT (s a1 a2) dict
   return $ AVM body dict2
 
@@ -605,13 +645,13 @@ unify a1 a2 = do
     -- This must match with treatment of nulls in subsumption
     f v1 v2 = CME.throwError $ printf "Cannot unify:\n  %s\n  %s" (show v1) (show v2)
 
-    dictMerge :: (CME.MonadError String m) => Dict -> Dict -> m Dict
-    dictMerge = unionWithKeyM f
+    mergeDictsM :: (CME.MonadError String m) => Dict -> Dict -> m Dict
+    mergeDictsM = unionWithKeyM f
       where
         f :: (CME.MonadError String m) => Index -> Value -> Value -> m Value
-        f k v1 v2 = if v1==v2
-                    then return v1
-                    else CME.throwError $ printf "Conflict for key %s: %s and %s " (show k) (show v1) (show v2) ++ "\n" ++ inlineAVM a1 ++ "\n" ++ inlineAVM a2
+        f k v1 v2 = case mergeValues v1 v2 of
+                      Just v -> return v
+                      Nothing -> CME.throwError $ printf "Conflict for key %s: %s and %s " (show k) (show v1) (show v2) ++ "\n" ++ inlineAVM a1 ++ "\n" ++ inlineAVM a2
 
 -- | Unification for multi-AVMs
 munify :: MultiAVM -> MultiAVM -> Either String MultiAVM
@@ -677,7 +717,6 @@ msubsumes a b | length (mavmBody a) /= length (mavmBody b) = False
 -- | Generalisation
 (⊓) :: AVM -> AVM -> AVM
 (⊓) = generalise
-
 infixl 6 ⊓ -- same as +
 
 -- | Generalisation
