@@ -58,20 +58,30 @@ ppTree = go 0
 
 ------------------------------------------------------------------------------
 -- Actual parse function
+-- This essentially enumerates all trees to a certain depth and finds matching one
 
--- | Stupid, brute-force parsing
+-- | Parse a string given a grammar and print output
+--   Sets max tree depth based on length of input
 parse :: String -> Grammar -> IO ()
-parse s g = mapM_ pp $ parse' tokens g (length tokens * 2) -- how much depth?
-  where tokens = words s
+parse s g = mapM_ pp $ parse' tokens g depth
+  where
+    tokens = words s
+    depth = (\x -> ceiling $ 1 + log (5*fromIntegral x)) $ length tokens
 
+-- | Parse a string given a grammar and print output
 parseD :: String -> Grammar -> Int -> IO ()
 parseD s g d = mapM_ pp $ parse' tokens g d
   where tokens = words s
 
+-- | Parse a string given a grammar and return all possible derivation trees
 parse' :: [Token] -> Grammar -> Int -> [DerivationTree]
 parse' ts g d = [ tree | tree <- allTrees g d, lin tree == ts]
 
--- | Enumerate all valid derivation trees from a grammar, up to a certain depth
+-- | Get all valid, complete sentences in a grammar, up to a certain tree depth
+allStrings :: Grammar -> Int -> [String]
+allStrings g depth = map (unwords.lin) $ filter isComplete $ allTrees g depth
+
+-- | Get all valid derivation trees from a grammar, up to a certain depth
 allTrees :: Grammar -> Int -> [DerivationTree]
 allTrees g depth = allTrees' (mkAVM1 "CAT" (ValAtom $ start g)) g depth
 
@@ -86,14 +96,18 @@ allTrees' avm g depth = go 0 avm
 
         -- Get matching rules (recurses)
         f (Rule mavm) =
-          if avm ⊔? lhs -- OK
-          then Just [ Node (mergeKids par kids) (cleanKids rs kids) | kids <- kidss, compatibleKids par kids ]
+          if avm ⊔? lhs
+          then Just [ Node (mergeKids par kids) (cleanKids kids) -- cleaning is probably unnecessary, just good practice
+                    | kids <- kidss
+                    , compatibleKids par kids ]
           else Nothing
           where
-            lhs = toAVM mavm 1
-            rhs = tail $ unMultiAVM mavm
-            par = avm ⊔ lhs -- new parent
-            rs = repls lhs par -- index replacements from above unification
+            -- replace all indices in rule to avoid clashes
+            rs = M.fromList $ zip [1..100] [newIndex avm..] -- TODO remove this hard limit
+            ravms = map (replaceIndices rs) (unMultiAVM mavm)
+            lhs = head ravms
+            rhs = map (setDict (avmDict par)) $ tail ravms
+            par = lhs ⊔ avm -- new parent (want to keep indices as in LHS)
             kidss :: [[DerivationTree]] =
               if d >= depth-1
               then combos $ [ [Node ravm []] | ravm <- rhs ]
@@ -105,16 +119,8 @@ allTrees' avm g depth = go 0 avm
           then Just [ Node par [Leaf tok] ]
           else Nothing
           where
-            par = avm ⊔ lhs -- new parent
-
-    -- Are all these kids unifiable with parent?
-    -- unifiableKids :: AVM -> [DerivationTree] -> Bool
-    -- unifiableKids avm kids = fst $ foldl (\(t,b) (Node a _) -> (t && b ⊔-? a, b ⊔- a)) (True,avm) kids
-    -- unifiableKids avm kids = all (\(Node a _) -> (avm ⊔-? a)) kids
-
-    -- -- Unify all these kids with parent
-    -- unifyKids :: AVM -> [DerivationTree] -> AVM
-    -- unifyKids avm kids = foldl (\b (Node a _) -> b ⊔- a) avm kids
+            par = lhs ⊔ avm -- new parent
+            -- NOTE reindexing not necessary here is terminals have no indices
 
     -- Are all these kids compatible with parent?
     compatibleKids :: AVM -> [DerivationTree] -> Bool
@@ -125,50 +131,8 @@ allTrees' avm g depth = go 0 avm
     mergeKids avm kids = foldl (\b (Node a _) -> mergeAVMDicts b a) avm kids
 
     -- Clean dictionaries of kids
-    cleanKids :: M.Map Index Index -> [DerivationTree] -> [DerivationTree]
-    cleanKids rs kids = [ Node (replaceIndices rs $ cleanDict avm) ks | Node avm ks <- kids ]
-
-    -- -- Unification, ignoring CAT category (retaining first)
-    -- (⊔-) :: AVM -> AVM -> AVM
-    -- (⊔-) a b = addAttr a'' (a' ⊔ b')
-    --   where
-    --     (a',a'') = remAttr (Attr "CAT") a
-    --     (b',_  ) = remAttr (Attr "CAT") b
-
-    -- -- Unifiable ignoring CAT category
-    -- (⊔-?) :: AVM -> AVM -> Bool
-    -- (⊔-?) a b = a' ⊔? b'
-    --   where
-    --     (a',_) = remAttr (Attr "CAT") a
-    --     (b',_) = remAttr (Attr "CAT") b
-
--- | Given two AVMs, try to figure out which indices where renamed
---   This would be best generated during unification, but i'm hoping this is a quick fix
---   Note the "direction" of the arguments
-repls :: AVM -> AVM -> M.Map Index Index
-repls a1 a2 = M.fromList $ L.nub $ catMaybes $ map f (paths a1)
-  where
-    f :: Path -> Maybe (Index, Index)
-    f p = case (val p a1, val p a2) of
-      (Just (ValIndex i1), Just (ValIndex i2)) -> if i1 /= i2 then Just (i1,i2) else Nothing
-      _ -> Nothing
-    -- Our own version of val which doesn't follow indices
-    val :: Path -> AVM -> Maybe Value
-    val [] avm = Nothing
-    val [a] avm = val' a avm
-    val (a:as) avm = case val' a avm of
-      Just (ValAVM avm') -> val as avm'
-      _ -> Nothing
-    val' a avm = M.lookup a (avmBody avm)
-
--- test = do
---   let
---     avm1 = mkAVM [("CAT",ValAtom "np"),("NUM",ValIndex 3)] `addDict` [(3,ValAtom "pl")]
---     avm2 = mkAVM [("NUM",ValIndex 2)]
---     u = avm1 ⊔ avm2
---   putStrLn $ inlineAVM avm2
---   putStrLn $ inlineAVM u
---   print $ repls avm2 u
+    cleanKids :: [DerivationTree] -> [DerivationTree]
+    cleanKids kids = [ Node (cleanDict avm) ks | Node avm ks <- kids ]
 
 -- | Get linearisation from derivation tree
 --   May include holes if tree is incomplete
@@ -176,6 +140,13 @@ lin :: DerivationTree -> [Token]
 lin (Leaf tok) = [tok]
 lin (Node _ []) = ["?"]
 lin (Node _ kids) = concatMap lin kids
+
+-- | Is a tree complete?
+--   Usefule for filtering
+isComplete :: DerivationTree -> Bool
+isComplete (Leaf _) = True
+isComplete (Node _ []) = False
+isComplete (Node _ kids) = all isComplete kids
 
 -- | Number of leaves in a tree
 leafs :: DerivationTree -> Int
@@ -185,17 +156,6 @@ leafs (Node _ kids) = sum (map leafs kids)
 
 ------------------------------------------------------------------------------
 -- Examples
-
--- tr :: DerivationTree
--- tr = Node (mkAVM [("CAT",ValAtom "s")] `addDict` [(1,ValAtom "pl")])
---      [ Node (mkAVM [("CAT",ValAtom "np"),("NUM",ValIndex 1)])
---        [ Node (mkAVM [("CAT",ValAtom "d"),("NUM",ValIndex 1)]) [Leaf "two"]
---        , Node (mkAVM [("CAT",ValAtom "n"),("NUM",ValIndex 1)]) [Leaf "sheep"]
---        ]
---      , Node (mkAVM [("CAT",ValAtom "vp"),("NUM",ValIndex 1)])
---        [ Node (mkAVM [("CAT",ValAtom "v"),("NUM",ValIndex 1)]) [Leaf "sleep"]
---        ]
---      ]
 
 g1 :: Grammar
 g1 = Grammar "s"
@@ -207,9 +167,9 @@ g1 = Grammar "s"
                          , cat "d" numX
                          , cat "n" numX
                          ]
-     -- , Rule $ mkMultiAVM [ cat "vp" numX
-     --                     , cat "v" numX
-     --                     ]
+     , Rule $ mkMultiAVM [ cat "vp" numX
+                         , cat "v" numX
+                         ]
      , Rule $ mkMultiAVM [ cat "vp" numX
                          , cat "v" numX
                          , cat "np" numY
@@ -235,39 +195,93 @@ g1 = Grammar "s"
        numSG = mkAVM [("NUM",ValIndex 1)] `addDict` [(1,ValAtom "sg")]
        numPL = mkAVM [("NUM",ValIndex 1)] `addDict` [(1,ValAtom "pl")]
 
--- Subcategorisation lists
+-- Adds case to g1
 g2 :: Grammar
 g2 = Grammar "s"
+     [ Rule $ mkMultiAVM [ cat "s" nullAVM
+                         , cat "np" $ numX ⊔ mkAVM1 "CASE" (ValAtom "nom")
+                         , cat "vp" numX
+                         ]
+     , Rule $ mkMultiAVM [ cat "np" $ numX ⊔ caseY
+                         , cat "d" numX
+                         , cat "n" $ numX ⊔ caseY
+                         ]
+     , Rule $ mkMultiAVM [ cat "np" $ numX ⊔ caseY
+                         , cat "pron" $ numX ⊔ caseY
+                         ]
+     , Rule $ mkMultiAVM [ cat "np" $ numX ⊔ caseY
+                         , cat "propn" $ numX ⊔ caseY
+                         ]
+     , Rule $ mkMultiAVM [ cat "vp" numX
+                         , cat "v" $ numX ⊔ scIntrans
+                         ]
+     , Rule $ mkMultiAVM [ cat "vp" numX
+                         , cat "v" $ numX ⊔ scTrans
+                         , cat "np" $ numY ⊔ mkAVM1 "CASE" (ValAtom "acc")
+                         ]
+
+       -- Terminals
+     , Terminal "sleeps" $ term "v" ⊔ numSG ⊔ scIntrans
+     , Terminal "sleep" $ term "v" ⊔ numPL ⊔ scIntrans
+     , Terminal "feeds" $ term "v" ⊔ numSG ⊔ scTrans
+     , Terminal "feed" $ term "v" ⊔ numPL ⊔ scTrans
+
+     , Terminal "lamb" $ term "n" ⊔ numSG ⊔ caseY
+     , Terminal "lambs" $ term "n" ⊔ numPL ⊔ caseY
+     , Terminal "she" $ term "pron" ⊔ numSG ⊔ mkAVM1 "CASE" (ValIndex 2) `addDict` [(2,ValAtom "nom")]
+     , Terminal "her" $ term "pron" ⊔ numSG ⊔ mkAVM1 "CASE" (ValIndex 2) `addDict` [(2,ValAtom "acc")]
+     , Terminal "John" $ term "propn" ⊔ numSG ⊔ caseY
+
+     , Terminal "a" $ term "d" ⊔ numSG
+     , Terminal "two" $ term "d" ⊔ numPL
+     ]
+     where
+       cat c avm = ValAVM $ mkAVM1 "CAT" (ValAtom c) ⊔ avm
+       term c = mkAVM1 "CAT" (ValAtom c)
+       numX = mkAVM1 "NUM" (ValIndex 1)
+       numY = mkAVM1 "NUM" (ValIndex 2)
+       caseY = mkAVM1 "CASE" (ValIndex 2)
+       scIntrans = mkAVM1 "SUBCAT" (ValAtom "intrans")
+       scTrans = mkAVM1 "SUBCAT" (ValAtom "trans")
+       numSG = mkAVM [("NUM",ValIndex 1)] `addDict` [(1,ValAtom "sg")]
+       numPL = mkAVM [("NUM",ValIndex 1)] `addDict` [(1,ValAtom "pl")]
+
+-- Subcategorisation lists, with number removed
+g3a :: Grammar
+g3a = Grammar "s"
      [ Rule $ mkMultiAVM [ ValAVM $ cat "s"
                          , ValAVM $ cat "np"
-                         -- , ValAVM $ cat "v" ⊔ mkAVM1 "SUBCAT" (unlist [])
-                         , ValAVM $ cat "v" ⊔ mkAVM1 "SUBCAT" (vnullAVM)
+                         , ValAVM $ cat "v" ⊔ mkAVM1 "SUBCAT" (unlist [])
                          ]
      , Rule $ mkMultiAVM [ ValAVM $ cat "v" ⊔ mkAVM1 "SUBCAT" (ValIndex 2)
-                         , ValAVM $ cat "v" ⊔ mkAVM1 "SUBCAT" (vmkAVM [("FIRST", vmkAVM1 "CAT" (ValIndex 1)), ("REST",ValIndex 2)])
+                         , ValAVM $ cat "v" ⊔ mkAVM1 "SUBCAT" (vmkAVM [ ("FIRST", vmkAVM1 "CAT" (ValIndex 1))
+                                                                      , ("REST",  ValIndex 2)
+                                                                      ])
                          , ValAVM $ mkAVM1 "CAT" (ValIndex 1)
                          ]
 
      , Terminal "John" $ term "np"
-     -- , Terminal "Mary" $ term "np"
+     , Terminal "Mary" $ term "np"
      -- , Terminal "Rachel" $ term "np"
-     -- , Terminal "sleeps" $ term "v" ⊔ subcats 0
-     , Terminal "loves"  $ term "v" ⊔ subcats 1
-     , Terminal "gives"  $ term "v" ⊔ subcats 2
-     -- , Terminal "tells"  $ term "v" ⊔ mkAVM1 "SUBCAT" (unlist [vmkAVM1 "CAT" (ValAtom "np"), vmkAVM1 "CAT" (ValAtom "s")])
+     , Terminal "sleeps" $ term "v" ⊔ mkAVM1 "SUBCAT" (unlist [])
+     , Terminal "loves"  $ term "v" ⊔ mkAVM1 "SUBCAT" (unlist [ vmkAVM1 "CAT" (ValAtom "np") ])
+     , Terminal "gives"  $ term "v" ⊔ mkAVM1 "SUBCAT" (unlist [ vmkAVM1 "CAT" (ValAtom "np")
+                                                              , vmkAVM1 "CAT" (ValAtom "np")
+                                                              ])
+     , Terminal "tells"  $ term "v" ⊔ mkAVM1 "SUBCAT" (unlist [ vmkAVM1 "CAT" (ValAtom "np")
+                                                              , vmkAVM1 "CAT" (ValAtom "s")
+                                                              ])
      ]
      where
-       subcats n = mkAVM1 "SUBCAT" (unlist (replicate n (vmkAVM1 "CAT" (ValAtom "np"))))
        cat c = mkAVM1 "CAT" (ValAtom c)
        term c = mkAVM1 "CAT" (ValAtom c)
 
--- Adds case
+-- As in slides
 g3 :: Grammar
 g3 = Grammar "s"
      [ Rule $ mkMultiAVM [ cat "s" $ nullAVM
                          , cat "np" $ numX ⊔ (mkAVM1 "CASE" (ValAtom "nom"))
-                         -- , cat "v" $ numX ⊔ (mkAVM1 "SUBCAT" (unlist []))
-                         , cat "v" $ numX ⊔ (mkAVM1 "SUBCAT" vnullAVM)
+                         , cat "v" $ numX ⊔ (mkAVM1 "SUBCAT" (unlist []))
                          ]
      , Rule $ mkMultiAVM [ cat "v" $ numX ⊔ (mkAVM1 "SUBCAT" (ValIndex 2))
                          , cat "v" $ numX ⊔ (mkAVM1 "SUBCAT" (vmkAVM [("FIRST",ValIndex 3), ("REST",ValIndex 2)]))

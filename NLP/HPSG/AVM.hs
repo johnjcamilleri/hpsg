@@ -126,16 +126,16 @@ unlist (l:ls) = vmkAVM [("FIRST",l),("REST",unlist ls)]
 --   Throws error if not well-formed
 tolist :: Value -> [Value]
 tolist (ValAtom "elist") = []
-tolist (ValAVM avm) = v "FIRST" avm : tolist (v "REST" avm)
+tolist (ValAVM avm) = v "FIRST" : tolist (v "REST")
   where
-    v s = fromJust . val [Attr s]
+    v s = (avmBody avm) M.! (Attr s)
 
 -- | Is an AVM actually an encoded list?
 islist :: Value -> Bool
 islist (ValAtom "elist") = True
-islist (ValAVM avm) = L.sort (M.keys (avmBody avm)) == [Attr "FIRST", Attr "REST"] && islist (v "REST" avm)
+islist (ValAVM avm) = L.sort (M.keys (avmBody avm)) == [Attr "FIRST", Attr "REST"] && islist (v "REST")
   where
-    v s = fromJust . val [Attr s]
+    v s = (avmBody avm) M.! (Attr s)
 islist _ = False
 
 -- | Remove an attribute from an AVM
@@ -179,22 +179,29 @@ isIndex v = case v of
   ValIndex _ -> True
   _ -> False
 
--- | Get indices in the AVM dictionary
-getDictIndices :: AVM -> [Index]
-getDictIndices avm = M.keys (avmDict avm)
-
--- | Get indices in the AVM body
+-- | Get indices in the AVM
 getIndices :: AVM -> [Index]
-getIndices avm = L.nub $ CMW.execWriter (f avm)
+getIndices avm = L.nub $ fb ++ fd
   where
-    f :: AVM -> CMW.Writer [Index] ()
-    f avm = mapM_ g (M.elems (avmBody avm))
-    g :: Value -> CMW.Writer [Index] ()
+    fb = concatMap g (M.elems (avmBody avm))
+    fd = concatMap g (M.elems (avmDict avm))
+
+    g :: Value -> [Index]
     g v = case v of
-      ValAVM avm -> f avm
-      ValList vs -> mapM_ g vs
-      ValIndex i -> CMW.tell [i]
-      _ -> return ()
+      ValAVM avm -> getIndices avm
+      ValList vs -> concatMap g vs
+      ValIndex i -> i : case lookupAVM i avm of
+                          Just v' -> g v'
+                          Nothing -> []
+      _ -> []
+
+-- | Get a new, unique index for this AVM
+newIndex :: AVM -> Index
+newIndex avm = if null is
+               then 1
+               else 1 + (last is)
+  where
+    is = L.sort $ getIndices avm
 
 -- | Are two AVM's dictionaries distinct?
 --   Helpful in test case generation
@@ -249,6 +256,10 @@ canMergeAVMDicts a b = canMergeDicts (avmDict a) (avmDict b)
 cleanDict :: AVM -> AVM
 cleanDict avm = AVM (avmBody avm) M.empty
 
+-- | Set the dictionary of an AVM
+setDict :: Dict -> AVM -> AVM
+setDict dict avm = AVM (avmBody avm) dict
+
 -- -- | Go over AVM and clear middle dictionaries.
 -- --   This involves pushing them up to the top level, possibly with renaming.
 -- cleanMiddleDicts :: AVM -> AVM
@@ -297,6 +308,25 @@ replaceIndices rs avm = AVM body' dict'
       ValList vs -> ValList $ map f vs
       ValAVM avm -> ValAVM $ replaceIndices rs avm
       _ -> v
+
+-- -- | Given two AVMs, try to figure out which indices where renamed
+-- --   This would be best generated during unification, but i'm hoping this is a quick fix
+-- --   Note the "direction" of the arguments
+-- replacedIndices :: AVM -> AVM -> M.Map Index Index
+-- replacedIndices a1 a2 = M.fromList $ L.nub $ catMaybes $ map f (paths a1)
+--   where
+--     f :: Path -> Maybe (Index, Index)
+--     f p = case (val p a1, val p a2) of
+--       (Just (ValIndex i1), Just (ValIndex i2)) -> if i1 /= i2 then Just (i1,i2) else Nothing
+--       _ -> Nothing
+--     -- Our own version of val which doesn't follow indices
+--     val :: Path -> AVM -> Maybe Value
+--     val [] avm = Nothing
+--     val [a] avm = val' a avm
+--     val (a:as) avm = case val' a avm of
+--       Just (ValAVM avm') -> val as avm'
+--       _ -> Nothing
+--     val' a avm = M.lookup a (avmBody avm)
 
 -- | Return all paths in an AVM
 paths :: AVM -> [Path]
