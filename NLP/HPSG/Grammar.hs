@@ -2,137 +2,47 @@
 
 -- | Unification Grammars with no CFG backbone
 --   Following http://cs.haifa.ac.il/~shuly/teaching/06/nlp/ug3.pdf
-module NLP.HPSG.UG where
+module NLP.HPSG.Grammar where
 
 import Common
-
 import NLP.HPSG.AVM
 
-import Data.Maybe (catMaybes)
-import qualified Data.Map as M
-import qualified Data.List as L
+------------------------------------------------------------------------------
+-- Types
 
-import Debug.Trace (trace)
-
+-- | Grammar
 data Grammar = Grammar {
-  start :: Cat,
-  rules :: [Rule]
+  start :: Cat,   -- ^ Start category
+  rules :: [Rule] -- ^ Rules
   }
   deriving (Eq, Ord, Show)
-
-type Token = String
 
 -- | Category
 type Cat = String
 
 -- | Rule is essentially a multi-avm, where first item is LHS
-data Rule = Rule MultiAVM
-          | Terminal Token AVM
+data Rule = Rule MultiAVM      -- ^ Non-terminal rule
+          | Terminal Token AVM -- ^ Terminal rule
   deriving (Eq, Ord, Show)
 
+-- | Token
+type Token = String
+
 -- | A derivation tree
--- Hack: use only the dictionary in root AVM
-data DerivationTree = Leaf Token
-                    | Node AVM [DerivationTree]
+--   Use only the dictionary in root AVM; all others should be empty
+data DerivationTree = Leaf Token                -- ^ A leaf
+                    | Node AVM [DerivationTree] -- ^ An intermediate node
   deriving (Eq, Ord, Show)
 
 ------------------------------------------------------------------------------
 -- Helpers
 
-getCat :: AVM -> Cat
-getCat avm = let Just (ValAtom c) = val [Attr "CAT"] avm in c
-
-------------------------------------------------------------------------------
--- Pretty printing
-
-pp :: DerivationTree -> IO ()
-pp = putStrLn . ppTree
-
-ppTree :: DerivationTree -> String
-ppTree = go 0
-  where
-    go :: Int -> DerivationTree -> String
-    go l d = concat (replicate l "  ") ++ case d of
-      Leaf tok -> show tok ++ "\n"
-      Node avm kids -> inlineAVM avm ++ "\n" ++ concatMap (go (l+1)) kids
-
-------------------------------------------------------------------------------
--- Actual parse function
--- This essentially enumerates all trees to a certain depth and finds matching one
-
--- | Parse a string given a grammar and print output
---   Sets max tree depth based on length of input
-parse :: String -> Grammar -> IO ()
-parse s g = mapM_ pp $ parse' tokens g depth
-  where
-    tokens = words s
-    depth = (\x -> ceiling $ 1 + log (5*fromIntegral x)) $ length tokens
-
--- | Parse a string given a grammar and print output
-parseD :: String -> Grammar -> Int -> IO ()
-parseD s g d = mapM_ pp $ parse' tokens g d
-  where tokens = words s
-
--- | Parse a string given a grammar and return all possible derivation trees
-parse' :: [Token] -> Grammar -> Int -> [DerivationTree]
-parse' ts g d = [ tree | tree <- allTrees g d, lin tree == ts]
-
--- | Get all valid, complete sentences in a grammar, up to a certain tree depth
-allStrings :: Grammar -> Int -> [String]
-allStrings g depth = map (unwords.lin) $ filter isComplete $ allTrees g depth
-
--- | Get all valid derivation trees from a grammar, up to a certain depth
-allTrees :: Grammar -> Int -> [DerivationTree]
-allTrees g depth = allTrees' (mkAVM1 "CAT" (ValAtom $ start g)) g depth
-
-allTrees' :: AVM -> Grammar -> Int -> [DerivationTree]
-allTrees' avm g depth = go 0 avm
-  where
-    go :: Int -> AVM -> [DerivationTree]
-    go d avm = concat drvs
-      where
-        drvs :: [[DerivationTree]] = filtermap f (rules g)
-        f :: (Rule -> Maybe [DerivationTree])
-
-        -- Get matching rules (recurses)
-        f (Rule mavm) =
-          if avm ⊔? lhs
-          then Just [ Node (mergeKids par kids) (cleanKids kids) -- cleaning is probably unnecessary, just good practice
-                    | kids <- kidss
-                    , compatibleKids par kids ]
-          else Nothing
-          where
-            -- replace all indices in rule to avoid clashes
-            rs = M.fromList $ zip [1..100] [newIndex avm..] -- TODO remove this hard limit
-            ravms = map (replaceIndices rs) (unMultiAVM mavm)
-            lhs = head ravms
-            rhs = map (setDict (avmDict par)) $ tail ravms
-            par = lhs ⊔ avm -- new parent (want to keep indices as in LHS)
-            kidss :: [[DerivationTree]] =
-              if d >= depth-1
-              then combos $ [ [Node ravm []] | ravm <- rhs ]
-              else combos $ map (go (d+1)) rhs
-
-        -- Get matching terminals
-        f (Terminal tok lhs) =
-          if avm ⊔? lhs
-          then Just [ Node par [Leaf tok] ]
-          else Nothing
-          where
-            par = lhs ⊔ avm -- new parent
-            -- NOTE reindexing not necessary here is terminals have no indices
-
-    -- Are all these kids compatible with parent?
-    compatibleKids :: AVM -> [DerivationTree] -> Bool
-    compatibleKids avm kids = fst $ foldl (\(t,b) (Node a _) -> (t && canMergeAVMDicts b a, mergeAVMDicts b a)) (True,avm) kids
-
-    -- Merge these kids with parent (dictionaries)
-    mergeKids :: AVM -> [DerivationTree] -> AVM
-    mergeKids avm kids = foldl (\b (Node a _) -> mergeAVMDicts b a) avm kids
-
-    -- Clean dictionaries of kids
-    cleanKids :: [DerivationTree] -> [DerivationTree]
-    cleanKids kids = [ Node (cleanDict avm) ks | Node avm ks <- kids ]
+-- | Is a tree complete?
+--   Useful for filtering
+isComplete :: DerivationTree -> Bool
+isComplete (Leaf _) = True
+isComplete (Node _ []) = False
+isComplete (Node _ kids) = all isComplete kids
 
 -- | Get linearisation from derivation tree
 --   May include holes if tree is incomplete
@@ -141,18 +51,20 @@ lin (Leaf tok) = [tok]
 lin (Node _ []) = ["?"]
 lin (Node _ kids) = concatMap lin kids
 
--- | Is a tree complete?
---   Usefule for filtering
-isComplete :: DerivationTree -> Bool
-isComplete (Leaf _) = True
-isComplete (Node _ []) = False
-isComplete (Node _ kids) = all isComplete kids
+------------------------------------------------------------------------------
+-- Pretty printing
 
--- | Number of leaves in a tree
-leafs :: DerivationTree -> Int
-leafs (Leaf tok) = 1
-leafs (Node _ []) = 0
-leafs (Node _ kids) = sum (map leafs kids)
+pp :: DerivationTree -> IO ()
+pp = putStrLn . ppTree
+
+-- | Pretty print a derivation tree
+ppTree :: DerivationTree -> String
+ppTree = go 0
+  where
+    go :: Int -> DerivationTree -> String
+    go l d = concat (replicate l "  ") ++ case d of
+      Leaf tok -> show tok ++ "\n"
+      Node avm kids -> inlineAVM avm ++ "\n" ++ concatMap (go (l+1)) kids
 
 ------------------------------------------------------------------------------
 -- Examples

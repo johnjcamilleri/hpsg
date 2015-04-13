@@ -45,10 +45,8 @@ type Atom = String
 
 -- | An attribute-value matrix, with bound variables
 data AVM = AVM {
-  -- ^ The inner AVM
-  avmBody :: AVMap,
-  -- ^ Dictionary used for structure sharing
-  avmDict :: Dict
+  avmBody :: AVMap, -- ^ The inner AVM
+  avmDict :: Dict   -- ^ Dictionary used for structure sharing
   }
   deriving (Eq, Ord, Show)
 
@@ -60,10 +58,8 @@ type Dict = M.Map Index Value
 
 -- | Multi-AVM
 data MultiAVM = MultiAVM {
-  -- ^ The inner AVMs or indices. Lists and atoms here are illegal.
-  mavmBody :: [Value],
-  -- ^ Dictionary used for structure sharing
-  mavmDict :: Dict
+  mavmBody :: [Value], -- ^ The inner AVMs or indices. Lists and atoms here are illegal.
+  mavmDict :: Dict     -- ^ Dictionary used for structure sharing
   }
   deriving (Eq, Ord, Show)
 
@@ -385,6 +381,10 @@ mkAVM' l d = AVM (attrMap l) (M.fromList d)
 -- | Add a dictionary to an AVM (overwrite)
 addDict :: AVM -> [(Index,Value)] -> AVM
 addDict avm d = avm { avmDict = M.fromList d }
+
+-- | Add a dictionary to an ValAVM (overwrite)
+vaddDict :: Value -> [(Index,Value)] -> Value
+vaddDict (ValAVM avm) d = ValAVM $ avm { avmDict = M.fromList d }
 
 -- | Make an AVM as a Value
 vmkAVM :: AVList -> Value
