@@ -49,7 +49,9 @@ data AVM = AVM {
   avmBody :: AVMap, -- ^ The inner AVM
   avmDict :: Dict   -- ^ Dictionary used for structure sharing
   }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
+instance Show AVM where
+  show = inlineAVM
 
 -- | A map of attribute-values
 type AVMap = M.Map Attribute Value
@@ -62,7 +64,9 @@ data MultiAVM = MultiAVM {
   mavmBody :: [Value], -- ^ The inner AVMs or indices. Lists and atoms here are illegal.
   mavmDict :: Dict     -- ^ Dictionary used for structure sharing
   }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
+instance Show MultiAVM where
+  show = inlineMAVM
 
 -- | Convert Multi-AVM to single AVM
 --   Indexes start from 1
@@ -344,6 +348,22 @@ paths avm = go avm []
 reentrant :: AVM -> Path -> Path -> Bool
 reentrant avm p1 p2 = val p1 avm == val p2 avm
 
+-- | Is an AVM cyclic?
+--   Ideally we should allow cycles, but makes thing loop infinitely
+cyclic :: AVM -> Bool
+cyclic avm = or $ map (\(i,v) -> f [i] v) (M.toList (avmDict avm))
+  where
+    f :: [Index] -> Value -> Bool
+    f is v = case v of
+      ValAVM avm -> or $ map (\(_,v) -> f is v) (M.toList (avmBody avm))
+      ValIndex i -> if i `elem` is then True else case lookupAVM i avm  of
+        Just v -> f (i:is) v
+        Nothing -> False
+      ValAtom _ -> False
+
+cyclicDict :: Dict -> Bool
+cyclicDict dict = cyclic $ AVM M.empty dict
+
 ------------------------------------------------------------------------------
 -- Builders
 
@@ -541,6 +561,15 @@ inlineAVM avm = CMW.execWriter f
           then putStr "]"
           else putStr ","
 
+-- | Inline a MultiAVM (one per line)
+inlineMAVM :: MultiAVM -> String
+inlineMAVM mavm = CMW.execWriter f
+  where
+    f :: (CMW.MonadWriter String m) => m ()
+    f = do
+      CMW.tell $ unlines $ map inlineAVM (unMultiAVM mavm)
+      ppDict (mavmDict mavm) False
+
 ------------------------------------------------------------------------------
 -- Identity
 
@@ -573,6 +602,10 @@ eq a b =
     eqV :: Value -> Value -> Bool
     eqV (ValIndex i1) v2 | M.member i1 d1 = eqV (d1 M.! i1) v2
     eqV v1 (ValIndex i2) | M.member i2 d2 = eqV v1 (d2 M.! i2)
+    eqV (ValIndex i1) (ValIndex i2) | not (M.member i1 d1) && not (M.member i2 d2) = True -- ignore actual indices when unbound
+
+    eqV (ValAVM avm1) (ValAVM avm2) = avm1 ~= avm2
+
     eqV v1 v2 = v1 == v2
 
 ------------------------------------------------------------------------------

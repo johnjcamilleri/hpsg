@@ -48,7 +48,7 @@ prop_unification_idempotent a =
 
 prop_unification_commutative :: AVM -> AVM -> Property
 prop_unification_commutative a b =
-  (a ⊔? b) && (distinctDicts a b) ==> (b ⊔? a) && (a ⊔ b ~= b ⊔ a)
+  (a ⊔? b) ==> (b ⊔? a) && (a ⊔ b ~= b ⊔ a)
 
 prop_unification_associative :: AVM -> AVM -> AVM -> Property
 prop_unification_associative a b c =
@@ -91,6 +91,7 @@ prop_generalisation_absorbing :: AVM -> AVM -> Property
 prop_generalisation_absorbing a b =
   a ⊑ b ==> a ⊓ b ~= a
 
+main = props
 props = do
   let args = stdArgs
         { maxSize = 10          -- default = 100
@@ -100,23 +101,23 @@ props = do
         }
 
   -- putStrLn "[ Equality ]"
-  -- putStrLn "Commutativity" >> quickCheckWith args prop_equality_commutative
+  -- putStrLn "Commutativity" >> quickCheckWith args prop_equality_commutative -- ok
   -- putStrLn ""
-  -- putStrLn "[ Subsumption ]"
-  -- putStrLn "Least element" >> quickCheckWith args prop_subsumption_least -- ok
-  -- putStrLn "Reflexivity" >> quickCheckWith args prop_subsumption_reflexive -- ok
-  -- putStrLn "Transitivity" >> quickCheckWith args prop_subsumption_transitive -- ok
-  -- putStrLn "Anti-symmetry" >> quickCheckWith args prop_subsumption_antisymmetric -- ok
-  -- putStrLn "Implies unifiable" >> quickCheckWith args prop_subsumes_implies_unifiable -- ok
-  -- putStrLn ""
+  putStrLn "[ Subsumption ]"
+  putStrLn "Least element" >> quickCheckWith args prop_subsumption_least -- ok
+  putStrLn "Reflexivity" >> quickCheckWith args prop_subsumption_reflexive -- ok
+  putStrLn "Transitivity" >> quickCheckWith args prop_subsumption_transitive -- ok
+  putStrLn "Anti-symmetry" >> quickCheckWith args prop_subsumption_antisymmetric -- ok
+  putStrLn "Implies unifiable" >> quickCheckWith args prop_subsumes_implies_unifiable -- ok
+  putStrLn ""
   putStrLn "[ Unification ]"
-  -- putStrLn "Idempotency" >> quickCheckWith args prop_unification_idempotent -- ok
-  -- putStrLn "Commutativity" >> quickCheckWith args prop_unification_commutative -- ok
-  -- putStrLn "Associativity" >> quickCheckWith args prop_unification_associative -- ok
-  -- putStrLn "Absorption" >> quickCheckWith args prop_unification_absorbing -- ok
+  putStrLn "Idempotency" >> quickCheckWith args prop_unification_idempotent -- ok
+  putStrLn "Commutativity" >> quickCheckWith args prop_unification_commutative -- ok
+  putStrLn "Associativity" >> quickCheckWith args prop_unification_associative -- ok
+  putStrLn "Absorption" >> quickCheckWith args prop_unification_absorbing -- not ok
   putStrLn "Monotinicity" >> quickCheckWith args prop_unification_monotonic -- not ok
   putStrLn "Most general" >> quickCheckWith args prop_unification_most_general -- not ok
-  -- putStrLn ""
+  putStrLn ""
   -- putStrLn "[ Generalisation ]"
   -- putStrLn "Idempotency" >> quickCheckWith args prop_generalisation_idempotent -- ok
   -- putStrLn "Commutativity" >> quickCheckWith args prop_generalisation_commutative -- ok
@@ -126,8 +127,8 @@ props = do
 -- Counter-examples
 
 pp s avm = do
-  putStrLn $ "--- " ++ s ++ " ---"
-  putStrLn $ ppAVM avm
+  putStr $ s ++ ": "
+  putStrLn $ inlineAVM avm
 
 -- cx_anti_symmetry = do
 --   let a = mkAVM [("C",ValNull)]
@@ -139,14 +140,16 @@ pp s avm = do
 --   assert $ b ⊑ a
 --   assert $ a ~= b
 
--- cx_implies_unifiable = do
---   let a = mkAVM' [("B",ValIndex 1)] [(1,ValList [])]
---   let b = mkAVM  [("B",vmkAVM [("A",ValList [])] )]
---   -- a ⊑ b ==> a ⊔? b
---   pp "a" a
---   pp "b" b
---   assert $ a ⊑ b
---   assert $ a ⊔? b
+cx_implies_unifiable = do
+  let a = mkAVM [("B",ValIndex 5)] `addDict` [(5,ValAtom "z")]
+  let b = mkAVM [("A",ValIndex 5),("B",ValIndex 3)] `addDict` [(3,ValAtom "z"),(5,ValAtom "y")]
+
+  -- a ⊑ b ==> a ⊔? b
+  pp "a" a
+  pp "b" b
+  putStrLn $ inlineAVM $ a ⊔ b
+  assert $ a ⊑ b
+  assert $ a ⊔? b
 
 -- cx_idempotency = do
 --   let a = mkAVM' [("B",ValIndex 2)] [(2,ValAtom "z")]
@@ -155,10 +158,11 @@ pp s avm = do
 --   assert $ a ~= a ⊔ a
 
 -- cx_commutativity = do
---   let a = mkAVM' [("C",ValIndex 5)] [(5,ValList [])]
---   let b = mkAVM' [("C",ValIndex 3)] [(3,ValList [ValList [ValNull]])]
+--   let a = mkAVM [("B",ValIndex 3)] `addDict` [(3,ValAtom "y")]
+--   let b = mkAVM [("B",ValIndex 2),("C",ValIndex 2)] `addDict` [(2,vnullAVM)]
 --   pp "a" a
 --   pp "b" b
+--   pp "b reindexed" (replaceIndices (M.fromList $ zip [1..100] [newIndex a..]) b)
 --   pp "a ⊔ b" $ a ⊔ b
 --   pp "b ⊔ a" $ b ⊔ a
 --   assert $ a ⊔ b ~= b ⊔ a
@@ -233,13 +237,18 @@ cx_merging_dicts = do
 ------------------------------------------------------------------------------
 -- Arbitrary instances
 
+arbitraryDict :: AVMap -> Gen Dict
+arbitraryDict body = do
+  let indices = getIndices (AVM body M.empty)
+  vs :: [Value] <- mapM (\_ -> arbitrary `suchThat` (not.isIndex)) indices
+  mask :: [Bool] <- mapM (const arbitrary) indices
+  let some_indices = map snd $ filter fst (zip mask indices)
+  return $ M.fromList (zip some_indices vs)
+
 instance Arbitrary AVM where
   arbitrary = do
     body <- arbitrary
-    let indices = getIndices (AVM body M.empty)
-    vs :: [Value] <- mapM (\_ -> arbitrary `suchThat` (not.isIndex)) indices
-    let dict = M.fromList (zip indices vs)
-    -- TODO: allow for non-bound variables
+    dict <- arbitraryDict body `suchThat` (not.cyclicDict)
     return $ AVM body dict
   shrink avm = [ AVM b (dictTrim b) | b <- shrink (avmBody avm) ]
     where
