@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module Test where
+module NLP.AVM.Test where
 
 import qualified Data.Map as M
 import Data.Maybe (fromJust)
@@ -8,7 +8,7 @@ import Data.Maybe (fromJust)
 import Test.QuickCheck
 import qualified Control.Monad.Writer as CMW
 
-import NLP.HPSG.AVM
+import NLP.AVM
 
 ------------------------------------------------------------------------------
 -- Properties
@@ -172,40 +172,40 @@ pp s avm = do
 --   assert $ a ⊑ b
 --   assert $ a ⊔ b ~= b
 
-cx_monotonic = do
-  -- a ⊑ b ==> (a ⊔ c) ⊑ (b ⊔ c)
-  let a = nullAVM
-  let b = mkAVM [("B",ValList [])]
-  let c = mkAVM [("B",vnullAVM)]
-  pp "a" a
-  pp "b" b
-  pp "c" c
-  assert $ a ⊑ b
-  assert $ a ⊔? c
-  assert $ b ⊔? c
-  pp "a ⊔ c" $ a ⊔ c
-  pp "b ⊔ c" $ b ⊔ c
-  assert $ (a ⊔ c) ⊑ (b ⊔ c)
+-- cx_monotonic = do
+--   -- a ⊑ b ==> (a ⊔ c) ⊑ (b ⊔ c)
+--   let a = nullAVM
+--   let b = mkAVM [("B",ValList [])]
+--   let c = mkAVM [("B",vnullAVM)]
+--   pp "a" a
+--   pp "b" b
+--   pp "c" c
+--   assert $ a ⊑ b
+--   assert $ a ⊔? c
+--   assert $ b ⊔? c
+--   pp "a ⊔ c" $ a ⊔ c
+--   pp "b ⊔ c" $ b ⊔ c
+--   assert $ (a ⊔ c) ⊑ (b ⊔ c)
 
-cx_most_general = do
-  -- b ⊔? c ==> let a = b ⊔ c in (b ⊑ a) && (c ⊑ a)
-  let b = mkAVM [("A",vnullAVM)]
-  let c = mkAVM' [("A",ValIndex 4)] [(4,ValList [])]
+-- cx_most_general = do
+--   -- b ⊔? c ==> let a = b ⊔ c in (b ⊑ a) && (c ⊑ a)
+--   let b = mkAVM [("A",vnullAVM)]
+--   let c = mkAVM' [("A",ValIndex 4)] [(4,ValList [])]
 
-  -- TODO: This is problematic cos of cycles (best to just avoid)
-  -- let b = mkAVM [("A",ValNull),("C",ValAtom "x")]
-  -- let c = mkAVM' [("A",ValIndex 1),("B",ValNull),("C",ValNull)]
-  --                [(1,vmkAVM [("A",ValAtom "y"),("B",ValIndex 1),("C",ValAtom "z")])]
-  pp "b" b
-  pp "c" c
-  putStrLn "b ⊔? c"
-  print $ b ⊔? c
-  let a = b ⊔ c
-  pp "a = b ⊔ c" $ a
-  putStrLn "b ⊑ a"
-  print $ b ⊑ a
-  putStrLn "c ⊑ a"
-  print $ c ⊑ a
+--   -- TODO: This is problematic cos of cycles (best to just avoid)
+--   -- let b = mkAVM [("A",ValNull),("C",ValAtom "x")]
+--   -- let c = mkAVM' [("A",ValIndex 1),("B",ValNull),("C",ValNull)]
+--   --                [(1,vmkAVM [("A",ValAtom "y"),("B",ValIndex 1),("C",ValAtom "z")])]
+--   pp "b" b
+--   pp "c" c
+--   putStrLn "b ⊔? c"
+--   print $ b ⊔? c
+--   let a = b ⊔ c
+--   pp "a = b ⊔ c" $ a
+--   putStrLn "b ⊑ a"
+--   print $ b ⊑ a
+--   putStrLn "c ⊑ a"
+--   print $ c ⊑ a
 
 cx_merging_dicts = do
   let
@@ -262,13 +262,13 @@ instance Arbitrary Value where
       arb n = oneof
               [ resize (n `div` 2) arbitraryAVMNoDict >>= return . ValAVM
               , arbitraryAtom >>= return . ValAtom
-              , resize (n `div` 2) arbitrary >>= return . ValList
+              -- , resize (n `div` 2) arbitrary >>= return . ValList
               , arbitraryIndex >>= return . ValIndex
               -- , return ValNull
               ]
   shrink v = case v of
     ValAVM avm -> map ValAVM (shrink avm)
-    ValList vs -> map ValList (shrink vs)
+    -- ValList vs -> map ValList (shrink vs)
     _ -> []
 
 -- | Arbitrary AVM with empty dictionary

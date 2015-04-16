@@ -6,7 +6,7 @@ as defined by Carl Pollard, Ivan A. Sag in their 1994 book
 module NLP.HPSG
   (
     -- * AVMs
-    module NLP.HPSG.AVM
+    module NLP.AVM
   ) where
 
-import NLP.HPSG.AVM
+import NLP.AVM

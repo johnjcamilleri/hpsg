@@ -1,7 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module NLP.HPSG.AVM where
+-- | Attribute-Value Matrices
+module NLP.AVM where
 
 import qualified Data.Map as M
 import qualified Data.List as L
@@ -26,13 +27,13 @@ data Attribute = Attr String
 -- | Value of an attribute
 data Value = ValAVM AVM      -- ^ A sub-structure (with its own dictionary - should always be factored up)
            | ValAtom Atom    -- ^ Atomic value
-           | ValList [Value] -- ^ List of values
+           -- | ValList [Value] -- ^ List of values
            | ValIndex Index  -- ^ Index to structure in dict
   deriving (Eq, Ord, Show)
 
 isValAVM   v = case v of ValAVM _ -> True ; _ -> False
 isValAtom  v = case v of ValAtom _ -> True ; _ -> False
-isValList  v = case v of ValList _ -> True ; _ -> False
+-- isValList  v = case v of ValList _ -> True ; _ -> False
 isValIndex v = case v of ValIndex _ -> True ; _ -> False
 
 type Path = [Attribute]
@@ -108,7 +109,7 @@ tryResolve :: Dict -> Value -> Value
 tryResolve dict v = case v of
   ValAVM avm -> ValAVM $ AVM (M.map (tryResolve dict) (avmBody avm)) (avmDict avm)
   ValAtom atom -> ValAtom atom
-  ValList vs -> ValList $ map (tryResolve dict) vs
+  -- ValList vs -> ValList $ map (tryResolve dict) vs
   ValIndex i -> case lookupDict i dict of
     Nothing -> vnullAVM -- default value when unbound
     Just x -> x
@@ -185,7 +186,7 @@ getIndices avm = L.nub $ fb ++ fd
     g :: Value -> [Index]
     g v = case v of
       ValAVM avm -> getIndices avm
-      ValList vs -> concatMap g vs
+      -- ValList vs -> concatMap g vs
       ValIndex i -> i : case lookupAVM i avm of
                           Just v' -> g v'
                           Nothing -> []
@@ -301,7 +302,7 @@ replaceIndices rs avm = AVM body' dict'
     f :: Value -> Value
     f v = case v of
       ValIndex i -> ValIndex $ M.findWithDefault i i rs
-      ValList vs -> ValList $ map f vs
+      -- ValList vs -> ValList $ map f vs
       ValAVM avm -> ValAVM $ replaceIndices rs avm
       _ -> v
 
@@ -486,7 +487,17 @@ ppMAVM mavm = CMW.execWriter f
 -- | Helper function for showing values, recursively
 --   `f` is the function applied to nested AVMs
 showValue :: (CMW.MonadWriter String m) => Value -> (AVM -> m ()) -> m ()
-showValue v f | islist v = showValue (ValList (tolist v)) f
+showValue v f | islist v =
+  do
+    let vs = tolist v
+    CMW.tell "<"
+    if null vs
+    then return ()
+    else do
+      -- let f avm = CMW.tell "."
+      showValue (head vs) f
+      mapM_ (\v -> CMW.tell "," >> showValue v f) (tail vs)
+    CMW.tell ">"
 showValue v f =
   case v of
     ValAVM avm ->
@@ -494,15 +505,15 @@ showValue v f =
       then error "Non-empty middle dictionary"
       else f avm
     ValAtom s  -> CMW.tell s
-    ValList vs -> do
-      CMW.tell "<"
-      if null vs
-      then return ()
-      else do
-        -- let f avm = CMW.tell "."
-        showValue (head vs) f
-        mapM_ (\v -> CMW.tell "," >> showValue v f) (tail vs)
-      CMW.tell ">"
+    -- ValList vs -> do
+    --   CMW.tell "<"
+    --   if null vs
+    --   then return ()
+    --   else do
+    --     -- let f avm = CMW.tell "."
+    --     showValue (head vs) f
+    --     mapM_ (\v -> CMW.tell "," >> showValue v f) (tail vs)
+    --   CMW.tell ">"
     ValIndex i -> CMW.tell $ "#"++show i
 
 -- | Pretty-print AVM in a single line

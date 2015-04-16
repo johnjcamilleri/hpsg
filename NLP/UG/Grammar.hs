@@ -2,10 +2,10 @@
 
 -- | Unification Grammars with no CFG backbone
 --   Following http://cs.haifa.ac.il/~shuly/teaching/06/nlp/ug3.pdf
-module NLP.HPSG.Grammar where
+module NLP.UG.Grammar where
 
 import Common
-import NLP.HPSG.AVM
+import NLP.AVM
 
 ------------------------------------------------------------------------------
 -- Types

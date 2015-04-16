@@ -2,12 +2,12 @@
 
 -- | Parsing of Unification Grammars with no CFG backbone
 --   Following http://cs.haifa.ac.il/~shuly/teaching/06/nlp/ug3.pdf
-module NLP.HPSG.Parse where
+module NLP.UG.Parse where
 
 import Common
 
-import NLP.HPSG.AVM
-import NLP.HPSG.Grammar
+import NLP.AVM
+import NLP.UG.Grammar
 
 import qualified Data.Map as M
 

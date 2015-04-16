@@ -1,8 +1,8 @@
 -- | Unification Grammars with a CFG backbone
 --   Following http://cs.haifa.ac.il/~shuly/teaching/06/nlp/ug2.pdf
-module NLP.HPSG.GrammarCFG where
+module NLP.UG.GrammarCFG where
 
-import NLP.HPSG.AVM
+import NLP.AVM
 
 data Grammar = Grammar {
   start :: Cat,
