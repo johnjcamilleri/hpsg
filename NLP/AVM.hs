@@ -59,7 +59,7 @@ type Dict = M.Map Index Value
 
 -- | Multi-AVM
 data MultiAVM = MultiAVM {
-  mavmBody :: [Value], -- ^ The inner AVMs or indices. Lists and atoms here are illegal.
+  mavmBody :: [Value], -- ^ The inner AVMs or indices. Atoms here are illegal.
   mavmDict :: Dict     -- ^ Dictionary used for structure sharing
   }
   deriving (Eq, Ord)
