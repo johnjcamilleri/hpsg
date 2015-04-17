@@ -75,7 +75,7 @@ allTrees' avm g depth = go 0 avm
           else Nothing
           where
             par = lhs ⊔ avm -- new parent
-            -- NOTE reindexing not necessary here is terminals have no indices
+            -- NOTE reindexing not necessary here as terminals have no indices
 
     -- Are all these kids compatible with parent?
     compatibleKids :: AVM -> [DerivationTree] -> Bool

@@ -57,9 +57,6 @@ prop_unification_associative a b c =
     , (b ⊔? c)
     , (a ⊔? (b ⊔ c))
     , ((a ⊔ b) ⊔? c)
-    , distinctDicts a b
-    , distinctDicts a c
-    , distinctDicts b c
     ] ==> a ⊔ (b ⊔ c) ~= (a ⊔ b) ⊔ c
 
 prop_unification_absorbing :: AVM -> AVM -> Property
@@ -140,16 +137,16 @@ pp s avm = do
 --   assert $ b ⊑ a
 --   assert $ a ~= b
 
-cx_implies_unifiable = do
-  let a = mkAVM [("B",ValIndex 5)] `addDict` [(5,ValAtom "z")]
-  let b = mkAVM [("A",ValIndex 5),("B",ValIndex 3)] `addDict` [(3,ValAtom "z"),(5,ValAtom "y")]
+-- cx_implies_unifiable = do
+--   let a = mkAVM [("A",ValIndex 3),("C",ValIndex 3)]
+--   let b = mkAVM [("A",ValAtom "y"),("C",ValAtom "x")]
 
-  -- a ⊑ b ==> a ⊔? b
-  pp "a" a
-  pp "b" b
-  putStrLn $ inlineAVM $ a ⊔ b
-  assert $ a ⊑ b
-  assert $ a ⊔? b
+--   -- a ⊑ b ==> a ⊔? b
+--   pp "a" a
+--   pp "b" b
+--   -- putStrLn $ inlineAVM $ a ⊔ b
+--   assert $ a ⊑ b
+--   assert $ a ⊔? b
 
 -- cx_idempotency = do
 --   let a = mkAVM' [("B",ValIndex 2)] [(2,ValAtom "z")]
@@ -167,29 +164,46 @@ cx_implies_unifiable = do
 --   pp "b ⊔ a" $ b ⊔ a
 --   assert $ a ⊔ b ~= b ⊔ a
 
+cx_associative = do
+  -- a ⊔ (b ⊔ c) ~= (a ⊔ b) ⊔ c
+
+  let a = mkAVM [("A",ValIndex 1)]
+  let b = mkAVM [("B",ValAtom "z")]
+  let c = mkAVM [("A",ValIndex 2),("B",ValIndex 2)]
+
+  pp "a" a
+  pp "b" b
+  pp "c" c
+  pp "b ⊔ c" $ b ⊔ c
+  pp "a ⊔ (b ⊔ c)" $ a ⊔ (b ⊔ c)
+  pp "a ⊔ b" $ a ⊔ b
+  pp "(a ⊔ b) ⊔ c" $ (a ⊔ b) ⊔ c
+  assert $  a ⊔ (b ⊔ c) ~= (a ⊔ b) ⊔ c
+
 -- cx_absorption = do
---   let a = mkAVM' [("C",ValIndex 1)] [(1,ValNull)]
---   let b = mkAVM' [("B",ValList [vmkAVM [("B",ValIndex 1)]]),("C",ValNull)] [(1,ValAtom "x")]
+--   let a = mkAVM [("A",ValIndex 1)] `addDict` [(1,vmkAVM [("A",ValIndex 2)])]
+--   let b = mkAVM [("A",vmkAVM [("A",vnullAVM)])]
+
 --   pp "a" a
 --   pp "b" b
 --   pp "a ⊔ b" $ a ⊔ b
 --   assert $ a ⊑ b
 --   assert $ a ⊔ b ~= b
 
--- cx_monotonic = do
---   -- a ⊑ b ==> (a ⊔ c) ⊑ (b ⊔ c)
---   let a = nullAVM
---   let b = mkAVM [("B",ValList [])]
---   let c = mkAVM [("B",vnullAVM)]
---   pp "a" a
---   pp "b" b
---   pp "c" c
---   assert $ a ⊑ b
---   assert $ a ⊔? c
---   assert $ b ⊔? c
---   pp "a ⊔ c" $ a ⊔ c
---   pp "b ⊔ c" $ b ⊔ c
---   assert $ (a ⊔ c) ⊑ (b ⊔ c)
+cx_monotonic = do
+  -- a ⊑ b ==> (a ⊔ c) ⊑ (b ⊔ c)
+  let a = nullAVM
+  let b = mkAVM [("C",ValIndex 1)]
+  let c = mkAVM [("A",ValIndex 1),("C",ValIndex 1)]
+  pp "a" a
+  pp "b" b
+  pp "c" c
+  assert $ a ⊑ b
+  assert $ a ⊔? c
+  assert $ b ⊔? c
+  pp "a ⊔ c" $ a ⊔ c
+  pp "b ⊔ c" $ b ⊔ c
+  assert $ (a ⊔ c) ⊑ (b ⊔ c)
 
 -- cx_most_general = do
 --   -- b ⊔? c ==> let a = b ⊔ c in (b ⊑ a) && (c ⊑ a)
@@ -237,14 +251,6 @@ cx_merging_dicts = do
 ------------------------------------------------------------------------------
 -- Arbitrary instances
 
-arbitraryDict :: AVMap -> Gen Dict
-arbitraryDict body = do
-  let indices = getIndices (AVM body M.empty)
-  vs :: [Value] <- mapM (\_ -> arbitrary `suchThat` (not.isIndex)) indices
-  mask :: [Bool] <- mapM (const arbitrary) indices
-  let some_indices = map snd $ filter fst (zip mask indices)
-  return $ M.fromList (zip some_indices vs)
-
 instance Arbitrary AVM where
   arbitrary = do
     body <- arbitrary
@@ -271,14 +277,20 @@ instance Arbitrary Value where
       arb n = oneof
               [ resize (n `div` 2) arbitraryAVMNoDict >>= return . ValAVM
               , arbitraryAtom >>= return . ValAtom
-              -- , resize (n `div` 2) arbitrary >>= return . ValList
               , arbitraryIndex >>= return . ValIndex
-              -- , return ValNull
               ]
   shrink v = case v of
     ValAVM avm -> map ValAVM (shrink avm)
-    -- ValList vs -> map ValList (shrink vs)
     _ -> []
+
+-- | Arbitrary dictionary based on given body (not all indices will be bound)
+arbitraryDict :: AVMap -> Gen Dict
+arbitraryDict body = do
+  let indices = getIndices (AVM body M.empty)
+  vs :: [Value] <- mapM (\_ -> arbitrary `suchThat` (not.isIndex)) indices
+  mask :: [Bool] <- mapM (const arbitrary) indices
+  let some_indices = map snd $ filter fst (zip mask indices)
+  return $ M.fromList (zip some_indices vs)
 
 -- | Arbitrary AVM with empty dictionary
 arbitraryAVMNoDict :: Gen AVM

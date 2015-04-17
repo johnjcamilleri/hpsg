@@ -27,13 +27,11 @@ data Attribute = Attr String
 -- | Value of an attribute
 data Value = ValAVM AVM      -- ^ A sub-structure (with its own dictionary - should always be factored up)
            | ValAtom Atom    -- ^ Atomic value
-           -- | ValList [Value] -- ^ List of values
            | ValIndex Index  -- ^ Index to structure in dict
   deriving (Eq, Ord, Show)
 
 isValAVM   v = case v of ValAVM _ -> True ; _ -> False
 isValAtom  v = case v of ValAtom _ -> True ; _ -> False
--- isValList  v = case v of ValList _ -> True ; _ -> False
 isValIndex v = case v of ValIndex _ -> True ; _ -> False
 
 type Path = [Attribute]
@@ -84,39 +82,28 @@ toAVM mavm i = AVM (body) (mavmDict mavm)
 ------------------------------------------------------------------------------
 -- Helpers
 
--- | val function as defined in
---   http://cs.haifa.ac.il/~shuly/teaching/06/nlp/ug1.pdf
+-- | val function as defined in http://cs.haifa.ac.il/~shuly/teaching/06/nlp/ug1.pdf
+--   Except that unbound variables return a ValIndex, not Nothing
+--   Nothing essentially means the path can't be resolved
 val :: Path -> AVM -> Maybe Value
-val [] avm = Nothing
-val [a] avm = val' a avm
-val (a:as) avm = case val' a avm of
-  Just (ValAVM avm) -> val as avm
-  _ -> Nothing
+val p avm = case p of
+  [] -> Nothing
+  [a] -> val' a avm
+  (a:as) -> case val' a avm of
+    Just (ValAVM avm) -> val as avm
+    _ -> Nothing
 
--- | Val for a single attribute
-val' :: Attribute -> AVM -> Maybe Value
-val' a avm = fmap (tryResolve (avmDict avm)) (M.lookup a (avmBody avm))
--- val' a avm = case M.lookup a (avmBody avm) of
---     Just (ValIndex i) -> case lookupAVM i avm of
---       Nothing -> Just vnullAVM
---       x -> x
---     x -> x
+  where
+    -- val for a single attribute
+    val' :: Attribute -> AVM -> Maybe Value
+    val' a avm = case M.lookup a (avmBody avm) of
+        Just (ValIndex i) -> lookupDict' i (avmDict avm)
+        x -> x
 
 -- | val extended for multi-AVMs
 --   Indexes start from 1
 mval :: Path -> MultiAVM -> Int -> Maybe Value
 mval p mavm i = val p (toAVM mavm i)
-
--- | Recurse through values and try to resolve indices, filling with nullAVM where not bound
---   This seems to be the desired behaviour of the val function
-tryResolve :: Dict -> Value -> Value
-tryResolve dict v = case v of
-  ValAVM avm -> ValAVM $ AVM (M.map (tryResolve dict) (avmBody avm)) (avmDict avm)
-  ValAtom atom -> ValAtom atom
-  -- ValList vs -> ValList $ map (tryResolve dict) vs
-  ValIndex i -> case lookupDict i dict of
-    Nothing -> vnullAVM -- default value when unbound
-    Just x -> x
 
 -- | Convert Haskell list to AVM-list
 unlist :: [Value] -> Value
@@ -167,11 +154,23 @@ lookupAVM :: Index -> AVM -> Maybe Value
 lookupAVM i avm = lookupDict i (avmDict avm)
 
 -- | Lookup in AVM dictionary, as deep as necessary
---   It is valid to have non-bound variables
+--   Non-bound variables will return nothing
 lookupDict :: Index -> Dict -> Maybe Value
 lookupDict i dict =
   case M.lookup i dict of
     Just (ValIndex j) -> lookupDict j dict
+    -- Just (ValIndex j) -> case lookupDict j dict of
+    --   Just v -> Just v
+    --   Nothing -> Just (ValIndex j)
+    x -> x
+
+-- | Lookup in AVM dictionary, as deep as necessary
+--   Non-bound variables will return most recent index
+lookupDict' :: Index -> Dict -> Maybe Value
+lookupDict' i dict =
+  case M.lookup i dict of
+    Just (ValIndex j) -> lookupDict' j dict
+    Nothing -> Just (ValIndex i)
     x -> x
 
 -- | Is a value an index? Useful as a filter function
@@ -190,7 +189,6 @@ getIndices avm = L.nub $ fb ++ fd
     g :: Value -> [Index]
     g v = case v of
       ValAVM avm -> getIndices avm
-      -- ValList vs -> concatMap g vs
       ValIndex i -> i : case lookupAVM i avm of
                           Just v' -> g v'
                           Nothing -> []
@@ -228,8 +226,8 @@ mergeDicts = M.unionWithKey f
 -- | Inner function for merging values
 --   This should be used by all dict merges
 mergeValues :: Value -> Value -> Maybe Value
-mergeValues v1 v2 | v1 == vnullAVM = Just v2
-mergeValues v1 v2 | v2 == vnullAVM = Just v1
+mergeValues v1 v2 | visnull v1 = Just v2
+mergeValues v1 v2 | visnull v2 = Just v1
 mergeValues v1 v2 = if v1==v2
                     then Just v1
                     else Nothing
@@ -282,9 +280,6 @@ setDict dict avm = AVM (avmBody avm) dict
 --           let b' = replaceIndices rs b
 --               newAVM = cleanMiddleDicts $ AVM b' M.empty
 --           return $ ValAVM newAVM
---     f (ValList vs) = do
---       vs' <- mapM f vs
---       return $ ValList vs'
 --     f v = return v
 
 -- -- | Rename/replace indices
@@ -294,19 +289,18 @@ setDict dict avm = AVM (avmBody avm) dict
 --     f :: Value -> Value
 --     f v = case v of
 --       ValIndex i -> ValIndex $ rs M.! i
---       ValList vs -> ValList $ map f vs
 --       _ -> v
 
 -- | Rename/replace indices
 replaceIndices :: M.Map Index Index -> AVM -> AVM
-replaceIndices rs avm = AVM body' dict'
+replaceIndices rs avm = AVM body' dict''
   where
     dict' = M.mapKeys (\k1 -> case M.lookup k1 rs of Just k2 -> k2 ; Nothing -> k1) (avmDict avm)
+    dict'' = M.map f dict'
     body' = M.map f (avmBody avm)
     f :: Value -> Value
     f v = case v of
       ValIndex i -> ValIndex $ M.findWithDefault i i rs
-      -- ValList vs -> ValList $ map f vs
       ValAVM avm -> ValAVM $ replaceIndices rs avm
       _ -> v
 
@@ -345,24 +339,37 @@ paths avm = go avm []
           _ -> []
 
 -- | Are two paths reentrant in an AVM?
-reentrant :: AVM -> Path -> Path -> Bool
-reentrant avm p1 p2 = val p1 avm == val p2 avm
+reentrant :: Path -> Path -> AVM -> Bool
+reentrant p1 p2 avm = case (val p1 avm, val p2 avm) of
+  (Just (ValIndex i1), Just (ValIndex i2)) -> i1 == i2
+  _ -> False
 
 -- | Is an AVM cyclic?
 --   Ideally we should allow cycles, but makes thing loop infinitely
 cyclic :: AVM -> Bool
-cyclic avm = or $ map (\(i,v) -> f [i] v) (M.toList (avmDict avm))
+cyclic avm = cyclicDict (avmDict avm)
+
+-- | Is an dictionary cyclic?
+--   Ideally we should allow cycles, but makes thing loop infinitely
+cyclicDict :: Dict -> Bool
+cyclicDict dict = or $ map (\(i,v) -> f [i] v) (M.toList (dict))
   where
     f :: [Index] -> Value -> Bool
     f is v = case v of
       ValAVM avm -> or $ map (\(_,v) -> f is v) (M.toList (avmBody avm))
-      ValIndex i -> if i `elem` is then True else case lookupAVM i avm  of
+      ValIndex i -> if i `elem` is then True else case lookupDict i dict  of
         Just v -> f (i:is) v
         Nothing -> False
       ValAtom _ -> False
 
-cyclicDict :: Dict -> Bool
-cyclicDict dict = cyclic $ AVM M.empty dict
+-- | Is an AVM empty?
+isnull :: AVM -> Bool
+isnull avm = M.null (avmBody avm)
+
+-- | Is an AVM inside a value empty?
+visnull :: Value -> Bool
+visnull (ValAVM avm) = isnull avm
+visnull _ = False
 
 ------------------------------------------------------------------------------
 -- Builders
@@ -511,10 +518,9 @@ showValue v f | islist v =
   do
     let vs = tolist v
     CMW.tell "<"
-    if null vs
+    if L.null vs
     then return ()
     else do
-      -- let f avm = CMW.tell "."
       showValue (head vs) f
       mapM_ (\v -> CMW.tell "," >> showValue v f) (tail vs)
     CMW.tell ">"
@@ -525,15 +531,6 @@ showValue v f =
       then error "Non-empty middle dictionary"
       else f avm
     ValAtom s  -> CMW.tell s
-    -- ValList vs -> do
-    --   CMW.tell "<"
-    --   if null vs
-    --   then return ()
-    --   else do
-    --     -- let f avm = CMW.tell "."
-    --     showValue (head vs) f
-    --     mapM_ (\v -> CMW.tell "," >> showValue v f) (tail vs)
-    --   CMW.tell ">"
     ValIndex i -> CMW.tell $ "#"++show i
 
 -- | Pretty-print AVM in a single line
@@ -592,6 +589,8 @@ infix 4 ≐ -- same as ==
 (~=) = eq
 infix 4 ~= -- same as ==
 
+-- | Equality that follows reentrants
+eq :: AVM -> AVM -> Bool
 eq a b | (M.keys (avmBody a)) /= (M.keys (avmBody b)) = False
 eq a b =
   all (\k -> M.member k b2 && eqV (b1 M.! k) (b2 M.! k)) (M.keys b1)
@@ -604,7 +603,7 @@ eq a b =
     eqV v1 (ValIndex i2) | M.member i2 d2 = eqV v1 (d2 M.! i2)
     eqV (ValIndex i1) (ValIndex i2) | not (M.member i1 d1) && not (M.member i2 d2) = True -- ignore actual indices when unbound
 
-    eqV (ValAVM avm1) (ValAVM avm2) = avm1 ~= avm2
+    eqV (ValAVM avm1) (ValAVM avm2) = (setDict d1 avm1) ~= (setDict d2 avm2)
 
     eqV v1 v2 = v1 == v2
 
@@ -629,17 +628,21 @@ infix 4 ⊔? -- same as <
 -- | Unification, with helpful error messages
 unify :: AVM -> AVM -> Either String AVM
 unify a1 a2 = do
-  -- if not (distinctIndices a2 a2)
+  -- if not (distinctIndices a1 a2)
   -- then CME.throwError "I don't want to unify AVMs with intersecting indices"
-  -- else return nullAVM
+  -- else return nullAVM -- dummy line
 
-  dict <- mergeDictsM (avmDict a1) (avmDict a2)
-  (body, dict2) <- CMS.runStateT (s a1 a2) dict
+  dict <- mergeDictsM d1 d2
+  (body, dict2) <- CMS.runStateT (unionWithM f b1 b2) dict
   return $ AVM body dict2
 
+  -- TODO: cleanup: unreferred-to things in dict
+  -- TODO: cleanup: pointers to pointers
+
   where
-    s :: (CME.MonadError String m, CMS.MonadState Dict m) => AVM -> AVM -> m AVMap
-    s a1 a2 = unionWithM f (avmBody a1) (avmBody a2)
+    -- a2' = replaceIndices (M.fromList $ zip (getIndices a2) [newIndex a1..]) a2
+    AVM b1 d1 = a1
+    AVM b2 d2 = a2 --a2'
 
     f :: (CME.MonadError String m, CMS.MonadState Dict m) => Value -> Value -> m Value
 
@@ -651,11 +654,17 @@ unify a1 a2 = do
         (Just v1,Just v2) -> do
           v' <- f v1 v2
           CMS.modify (M.insert i1 v')
-          -- CMS.modify (M.delete i2) -- someone else might be referring to it...
+          -- CMS.modify (M.insert i2 (ValIndex i1))
           return $ ValIndex i1
-        (Just v1,Nothing) -> return $ ValIndex i1
-        (Nothing,Just v2) -> return $ ValIndex i2
-        (Nothing,Nothing) -> return $ ValIndex i1 -- is that right?
+        (Just v1,Nothing) -> do
+          -- CMS.modify (M.insert i2 (ValIndex i1))
+          return $ ValIndex i1
+        (Nothing,Just v2) -> do
+          -- CMS.modify (M.insert i1 (ValIndex i2))
+          return $ ValIndex i2
+        (Nothing,Nothing) -> do
+          -- CMS.modify (M.insert i2 (ValIndex i1))
+          return $ ValIndex i1
     f (ValIndex i1) v2 = do
       mv1 <- CMS.gets (lookupDict i1)
       case mv1 of
@@ -674,27 +683,6 @@ unify a1 a2 = do
         Nothing ->
           CMS.modify (M.insert i2 v1)
       return $ ValIndex i2
-    -- f (ValIndex i1) v2 = do
-    --   (d1,d2) <- CMS.get
-    --   mv1 <- CMS.gets (\(d1,d2) -> lookupDict i1 d1)
-    --   case mv1 of
-    --     Just v1 -> do
-    --       v1' <- f v1 v2
-    --       CMS.modify (\(d1,d2) -> (M.insert i1 v1' d1, d2))
-    --     Nothing ->
-    --       CMS.modify (\(d1,d2) -> (M.insert i1 v2 d1, d2))
-    --   -- CMS.get >>= \s -> trace (show s) (return vnullAVM)
-    --   return $ ValIndex i1
-    -- f v1 (ValIndex i2) = do
-    --   mv2 <- CMS.gets (\(d1,d2) -> lookupDict i2 d2)
-    --   case mv2 of
-    --     Just v2 -> do
-    --       v2' <- f v1 v2
-    --       CMS.modify (\(d1,d2) -> (d1, M.insert i2 v2' d2))
-    --     Nothing ->
-    --       CMS.modify (\(d1,d2) -> (d1, M.insert i2 v1 d2))
-    --   -- CMS.get >>= \s -> trace (show s) (return vnullAVM)
-    --   return $ ValIndex i2
 
     -- General equality
     f v1 v2 | v1 == v2 = return v1
@@ -703,18 +691,8 @@ unify a1 a2 = do
       | (avmDict av2) /= M.empty = CME.throwError $ "Non-empty dictionary in value"
       | otherwise = do avmap <- unionWithM f (avmBody av1) (avmBody av2)
                        return $ ValAVM $ AVM avmap M.empty
-    f (ValAVM av1) v2 | (avmBody av1) == M.empty = return v2
-    f v1 (ValAVM av2) | (avmBody av2) == M.empty = return v1
-
-    -- Empty lists should be treated like nulls
-    -- f (ValList []) v2 = return v2
-    -- f v1 (ValList []) = return v1
-
-    -- Singleton lists should be treated like their head
-    -- f (ValList [v1']) (ValList [v2']) = f v1' v2'
-    -- f (ValList [v1']) v2 = f v1' v2
-    -- f v1 (ValList [v2']) = f v1 v2'
-    -- f (ValList l1) (ValList l2) = return $ ValList (l1++l2)
+    f (ValAVM av1) v2 | isnull av1 = return v2
+    f v1 (ValAVM av2) | isnull av2 = return v1
 
     -- This must match with treatment of nulls in subsumption
     f v1 v2 = CME.throwError $ printf "Cannot unify:\n  %s\n  %s" (show v1) (show v2)
@@ -743,10 +721,12 @@ munify a b | length (mavmBody a) /= length (mavmBody b) = Left "Multi-AVMs have 
 subsumable :: AVM -> AVM -> Bool
 subsumable a b = a ⊑ b || a ⊒ b
 
+-- | Subsumes
 (⊑) :: AVM -> AVM -> Bool
 (⊑) = subsumes
 infix 4 ⊑ -- same as <
 
+-- | Is subsumed by
 (⊒) :: AVM -> AVM -> Bool
 (⊒) = flip subsumes
 infix 4 ⊒ -- same as >
@@ -757,11 +737,13 @@ infix 4 ⊒ -- same as >
 subsumes :: AVM -> AVM -> Bool
 subsumes a b =
   all (\k -> M.member k b2 && subV (b1 M.! k) (b2 M.! k)) (M.keys b1)
+  && and [ if reentrant p1 p2 a then reentrant p1 p2 b else True | p1 <- paths a, p2 <- paths a, p1 /= p2 ]
   where
     (b1,d1) = (avmBody a, avmDict a)
     (b2,d2) = (avmBody b, avmDict b)
 
     subV :: Value -> Value -> Bool
+    subV (ValIndex i1) (ValIndex i2) | not (M.member i1 d1) && not (M.member i2 d2) = True -- ignore actual indices when unbound
     subV (ValIndex i1) v2 | M.member i1 d1 = subV (d1 M.! i1) v2
                           | otherwise      = True
     subV v1 (ValIndex i2) | M.member i2 d2 = subV v1 (d2 M.! i2)
@@ -773,8 +755,7 @@ subsumes a b =
       in subsumes avm1' avm2'
 
     -- This must match with treatment of nulls in unification
-    -- subV (ValAVM avm) v2 | avm == nullAVM = True
-    -- subV (ValList []) v2 = True
+    subV (ValAVM avm) v2 | isnull avm = True -- converse not true
 
     subV v1 v2 = v1 == v2
 
@@ -783,7 +764,7 @@ msubsumes :: MultiAVM -> MultiAVM -> Bool
 msubsumes a b | length (mavmBody a) /= length (mavmBody b) = False
               | otherwise = and [ p `subsumes` q && reent p q | (p,q) <- zip (unMultiAVM a) (unMultiAVM b) ]
   where
-    reent p q = and [ if reentrant p pi1 pi2 then reentrant q pi1 pi2 else True | pi1 <- paths p, pi2 <- paths p ]
+    reent p q = and [ if reentrant pi1 pi2 p then reentrant pi1 pi2 q else True | pi1 <- paths p, pi2 <- paths p, pi1 /= pi2 ]
 
 ------------------------------------------------------------------------------
 -- Generalisation
@@ -807,8 +788,8 @@ generalise a1 a2 = AVM body dict
                             | otherwise      = Nothing
     genV k v1 (ValIndex i2) | M.member i2 d2 = genV k v1 (d2 M.! i2)
                             | otherwise      = Nothing
-    genV k v1@(ValAVM avm) v2 | avm == nullAVM = Just v1
-    genV k v1 v2@(ValAVM avm) | avm == nullAVM = Just v2
+    genV k v1@(ValAVM avm) v2 | isnull avm = Just v1
+    genV k v1 v2@(ValAVM avm) | isnull avm = Just v2
     genV k v1 v2 =
       if v1 == v2
       then Just v1
