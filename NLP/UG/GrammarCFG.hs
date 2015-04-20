@@ -13,7 +13,7 @@ import NLP.AVM
 -- | Grammar
 data Grammar = Grammar {
   start :: Cat,
-  rules :: [Rule]
+  rules :: [ERule]
   }
   deriving (Eq, Ord, Show)
 
@@ -21,14 +21,14 @@ data Grammar = Grammar {
 type Cat = String
 
 -- | Context-free rule
-data CFRule = CFRule [Cat]
-            | Terminal Cat Token
+data Rule = Rule [Cat]          -- ^ Head is LHS, tail is RHS
+          | Terminal Cat Token
   deriving (Eq, Ord, Show)
 
 -- | Extended context-free rule
-data Rule = Rule {
-  cfRule :: CFRule,
-  mavm :: MultiAVM -- must have same length as cfRule
+data ERule = ERule {
+  rule :: Rule,
+  mavm :: MultiAVM -- must have same length as rule
   }
   deriving (Eq, Ord, Show)
 
@@ -42,26 +42,58 @@ data DerivationTree = Leaf Token                    -- ^ A leaf
   deriving (Eq, Ord, Show)
 
 ------------------------------------------------------------------------------
+-- Helpers
+
+-- | Is a tree complete?
+--   Useful for filtering
+isComplete :: DerivationTree -> Bool
+isComplete (Leaf _) = True
+isComplete (Node _ _ []) = False
+isComplete (Node _ _ kids) = all isComplete kids
+
+-- | Get linearisation from derivation tree
+--   May include holes if tree is incomplete
+lin :: DerivationTree -> [Token]
+lin (Leaf tok) = [tok]
+lin (Node _ _ []) = ["?"]
+lin (Node _ _ kids) = concatMap lin kids
+
+------------------------------------------------------------------------------
+-- Pretty printing
+
+pp :: DerivationTree -> IO ()
+pp = putStrLn . ppTree
+
+-- | Pretty print a derivation tree
+ppTree :: DerivationTree -> String
+ppTree = go 0
+  where
+    go :: Int -> DerivationTree -> String
+    go l d = concat (replicate l "  ") ++ case d of
+      Leaf tok -> show tok ++ "\n"
+      Node cat avm kids -> cat ++ " " ++ inlineAVM avm ++ "\n" ++ concatMap (go (l+1)) kids
+
+------------------------------------------------------------------------------
 -- Examples
 
 g1 :: Grammar
 g1 = Grammar "s"
-     [ Rule (CFRule ["s", "np", "vp"]) (mkMultiAVM [vnullAVM,numX,numX])
-     , Rule (CFRule ["np", "d", "n"]) (mkMultiAVM [numX,numX,numX])
-     , Rule (CFRule ["vp", "v"]) (mkMultiAVM [numX,numX])
-     , Rule (CFRule ["vp", "v", "np"]) (mkMultiAVM [numX,numX,numY])
+     [ ERule (Rule ["s", "np", "vp"]) (mkMultiAVM [vnullAVM,numX,numX])
+     , ERule (Rule ["np", "d", "n"]) (mkMultiAVM [numX,numX,numX])
+     , ERule (Rule ["vp", "v"]) (mkMultiAVM [numX,numX])
+     , ERule (Rule ["vp", "v", "np"]) (mkMultiAVM [numX,numX,numY])
 
      -- Terminals
-     , Rule (Terminal "n" "lamb") (mkMultiAVM [numX,numSG])
-     , Rule (Terminal "n" "lambs") (mkMultiAVM [numX,numPL])
-     , Rule (Terminal "n" "sheep") (mkMultiAVM [numX,numSG])
-     , Rule (Terminal "n" "sheep") (mkMultiAVM [numX,numPL])
+     , ERule (Terminal "n" "lamb") (mkMultiAVM [numX,numSG])
+     , ERule (Terminal "n" "lambs") (mkMultiAVM [numX,numPL])
+     , ERule (Terminal "n" "sheep") (mkMultiAVM [numX,numSG])
+     , ERule (Terminal "n" "sheep") (mkMultiAVM [numX,numPL])
 
-     , Rule (Terminal "v" "sleeps") (mkMultiAVM [numX,numSG])
-     , Rule (Terminal "v" "sleep") (mkMultiAVM [numX,numPL])
+     , ERule (Terminal "v" "sleeps") (mkMultiAVM [numX,numSG])
+     , ERule (Terminal "v" "sleep") (mkMultiAVM [numX,numPL])
 
-     , Rule (Terminal "d" "a") (mkMultiAVM [numX,numSG])
-     , Rule (Terminal "d" "two") (mkMultiAVM [numX,numPL])
+     , ERule (Terminal "d" "a") (mkMultiAVM [numX,numSG])
+     , ERule (Terminal "d" "two") (mkMultiAVM [numX,numPL])
      ]
   where
     numX = vmkAVM1 "NUM" (ValIndex 1)
