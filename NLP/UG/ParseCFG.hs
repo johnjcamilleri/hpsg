@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Parsing of Unification Grammars with a CFG backbone
@@ -8,7 +9,10 @@ import Common
 import NLP.AVM
 import NLP.UG.GrammarCFG
 
+import qualified Data.Char as C
 import qualified Data.Map as M
+import qualified Data.List as L
+import qualified Control.Monad.State as CMS
 import Debug.Trace (trace)
 
 ------------------------------------------------------------------------------
@@ -41,45 +45,47 @@ allTrees :: Grammar -> Int -> [DerivationTree]
 allTrees g depth = allTrees' (start g) nullAVM g depth
 
 allTrees' :: Cat -> AVM -> Grammar -> Int -> [DerivationTree]
-allTrees' cat avm g depth = go 0 cat avm
+allTrees' cat avm g depth =
+  CMS.evalState (go 0 [1] cat avm) (newIndex avm)
   where
-    go :: Int -> Cat -> AVM -> [DerivationTree]
-    go d cat avm = concat drvs
+    go :: (CMS.MonadState Int m) => Int -> [Int] -> Cat -> AVM -> m [DerivationTree]
+    go d pth cat avm = do
+      drvs :: [[DerivationTree]] <- filtermapM f (rules g)
+      return $ concat drvs
       where
-        drvs :: [[DerivationTree]] = filtermap f (rules g)
-        f :: (ERule -> Maybe [DerivationTree])
+        f :: (CMS.MonadState Int m) => ERule -> m (Maybe [DerivationTree])
 
         -- Get matching rules (recurses)
-        f (ERule (Rule (clhs:crhs)) mavm) =
-          if cat == clhs && avm ⊔? lhs
-          then Just [ Node clhs (mergeKids par kids) (cleanKids kids) -- cleaning is probably unnecessary, just good practice
-                    | kids <- kidss -- kids :: [DerivationTree]
-                    , compatibleKids par kids ]
-          else Nothing
-          where
-            -- replace all indices in rule to avoid clashes
-            rs = M.fromList $ zip [1..100] [newIndex avm..] -- TODO remove this hard limit
+        f (ERule (Rule (clhs:crhs)) mavm) = do
+          let
+            from :: Int = read (concat (map show (reverse (tail pth))) ++ show (newIndex avm))
+            rs = M.fromList $ zip [1..100] [from..] -- TODO remove this hard limit
             ravms = map (replaceIndices rs) (unMultiAVM mavm)
             lhs = head ravms
             rhs = map (setDict (avmDict par)) $ tail ravms
-            par = lhs ⊔ avm -- new parent (want to keep indices as in LHS)
-            kidss :: [[DerivationTree]] =
-              if d >= depth-1
-              then combos $ [ [Node c ravm []] | (c,ravm) <- zip crhs rhs ]
-              else combos $ [ go (d+1) c ravm | (c,ravm) <- zip crhs rhs ]
+            par = avm ⊔ lhs
+          kidss' :: [[DerivationTree]] <-
+            if d >= depth-1
+            then return   [ [Node c ravm []] | (c,ravm) <- zip crhs rhs ]
+            else sequence [ go (d+1) (i:pth) c ravm  | (i,(c,ravm)) <- zip [1..] (zip crhs rhs) ]
+          let kidss = combos kidss'
+
+          if cat == clhs && avm ⊔? lhs
+          then return $ Just [ Node clhs (mergeKids par kids) (cleanKids kids) -- cleaning is probably unnecessary, just good practice
+                             | kids <- kidss -- kids :: [DerivationTree]
+                             , compatibleKids par kids ]
+          else return $ Nothing
 
         -- Get matching terminals
-        f (ERule (Terminal clhs tok) mavm) =
-          if cat == clhs -- && avm ⊔? lhs
-          then Just [ Node clhs par [Leaf tok] ]
-          else Nothing
-          where
-            rs = M.fromList $ zip [1..100] [newIndex avm..] -- TODO remove this hard limit
-            ravms = map (replaceIndices rs) (unMultiAVM mavm)
-            lhs = head ravms
-            -- [rhs] = map (setDict (avmDict par)) $ tail ravms
-            par = lhs ⊔ avm -- new parent
-            -- NOTE reindexing not necessary here as terminals have no indices
+        f (ERule (Terminal clhs tok) mavm) = do
+          let
+            from :: Int = read (concat (map show (reverse (tail pth))) ++ show (newIndex avm))
+            rs = M.fromList $ zip [1..100] [from..] -- TODO remove this hard limit
+            lhs:rhs:[] = map (replaceIndices rs) (unMultiAVM mavm)
+            par = avm ⊔ rhs
+          if cat == clhs && avm ⊔? rhs
+          then return $ Just [ Node clhs par [Leaf tok] ]
+          else return $ Nothing
 
     -- Are all these kids compatible with parent?
     compatibleKids :: AVM -> [DerivationTree] -> Bool
@@ -92,3 +98,57 @@ allTrees' cat avm g depth = go 0 cat avm
     -- Clean dictionaries of kids
     cleanKids :: [DerivationTree] -> [DerivationTree]
     cleanKids kids = [ Node c (cleanDict avm) ks | Node c avm ks <- kids ]
+
+------------------------------------------------------------------------------
+-- Test
+
+test :: IO ()
+test = do
+  let
+    ss1 = allStrings g1 6
+    ss1' = ["a lamb sleeps"
+           ,"a lamb sleeps a lamb"
+           ,"a lamb sleeps a sheep"
+           ,"a lamb sleeps two lambs"
+           ,"a lamb sleeps two sheep"
+           ,"a sheep sleeps"
+           ,"a sheep sleeps a lamb"
+           ,"a sheep sleeps a sheep"
+           ,"a sheep sleeps two lambs"
+           ,"a sheep sleeps two sheep"
+           ,"two lambs sleep"
+           ,"two lambs sleep a lamb"
+           ,"two lambs sleep a sheep"
+           ,"two lambs sleep two lambs"
+           ,"two lambs sleep two sheep"
+           ,"two sheep sleep"
+           ,"two sheep sleep a lamb"
+           ,"two sheep sleep a sheep"
+           ,"two sheep sleep two lambs"
+           ,"two sheep sleep two sheep"]
+
+    ss2 = allStrings g2 6
+    ss2' = ["a lamb herds a lamb"
+           ,"a lamb herds Rachel"
+           ,"a lamb herds her"
+           ,"Rachel herds a lamb"
+           ,"Rachel herds Rachel"
+           ,"Rachel herds her"
+           ,"she herds a lamb"
+           ,"she herds Rachel"
+           ,"she herds her"]
+
+  f ss1' ss1
+  f ss2' ss2
+
+  where
+    f gold out = do
+      if L.sort gold == L.sort out
+      then
+        putStrLn "Ok"
+      else do
+        putStrLn "Under:"
+        putStrLn $ unlines $ gold L.\\ out
+        putStrLn "Over:"
+        putStrLn $ unlines $ out L.\\ gold
+      putStrLn "------------------------"

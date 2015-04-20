@@ -100,3 +100,49 @@ g1 = Grammar "s"
     numY = vmkAVM1 "NUM" (ValIndex 2)
     numSG = vmkAVM [("NUM",ValIndex 1)] `vaddDict` [(1,ValAtom "sg")]
     numPL = vmkAVM [("NUM",ValIndex 1)] `vaddDict` [(1,ValAtom "pl")]
+
+-- Adds case
+g2 :: Grammar
+g2 = Grammar "s"
+     [ mkR ["s", "np", "vp"] [nullAVM,numX ⊔ casenom,numX]
+     , mkR ["np", "d", "n"] [numX ⊔ caseY,numX,numX ⊔ caseY]
+     , mkR ["np", "propn"] [numX ⊔ caseY,numX ⊔ caseY]
+     , mkR ["np", "pron"]  [numX ⊔ caseY,numX ⊔ caseY]
+     , mkR ["vp", "v", "np"] [numX,numX,numY ⊔ caseacc]
+
+     -- Terminals
+     , mkT "n" "lamb" numX numXsg
+     -- , mkT "n" "lambs" numX numXpl
+     -- , mkT "n" "sheep" numX numXsg
+     -- , mkT "n" "sheep" numX numXpl
+     , mkT "propn" "Rachel" (numX ⊔ caseY) (numXsg ⊔ caseY)
+     -- , mkT "propn" "Jacob" (numX ⊔ caseY) (numXsg ⊔ caseY)
+
+     , mkT "pron" "she" (numX ⊔ caseY) (numXsg ⊔ caseYnom)
+     , mkT "pron" "her" (numX ⊔ caseY) (numXsg ⊔ caseYacc)
+
+     , mkT "v" "herds" numX numXsg
+     -- , mkT "v" "herd" numX numXpl
+
+     , mkT "d" "a" numX numXsg
+     -- , mkT "d" "two" numX numXpl
+     ]
+  where
+
+    mkR :: [Cat] -> [AVM] -> ERule
+    mkR cats avms
+      | length cats /= length avms = error "mkR: unequal lengths"
+      | otherwise = ERule (Rule cats) (mkMultiAVM (map ValAVM avms))
+
+    mkT :: Cat -> Token -> AVM -> AVM -> ERule
+    mkT cat tok avm1 avm2 = ERule (Terminal cat tok) (mkMultiAVM [ValAVM avm1, ValAVM avm2])
+
+    numX = mkAVM1 "NUM" (ValIndex 1)
+    numY = mkAVM1 "NUM" (ValIndex 2)
+    numXsg = numX `addDict` [(1,ValAtom "sg")]
+    numXpl = numX `addDict` [(1,ValAtom "pl")]
+    casenom = mkAVM1 "CASE" (ValAtom "nom")
+    caseacc = mkAVM1 "CASE" (ValAtom "acc")
+    caseY = mkAVM1 "CASE" (ValIndex 2)
+    caseYnom = caseY `addDict` [(2,ValAtom "nom")]
+    caseYacc = caseY `addDict` [(2,ValAtom "acc")]

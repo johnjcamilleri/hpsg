@@ -1,13 +1,22 @@
 module Common where
 
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, catMaybes)
 
 -- | filter and map together
 mapfilter :: (a -> Maybe b) -> [a] -> [b]
 mapfilter = mapMaybe
 
+-- | filter and map together (monadic)
+mapfilterM :: (Monad m) => (a -> m (Maybe b)) -> [a] -> m [b]
+mapfilterM f as = sequence (map f as) >>= return . catMaybes
+
 -- | filter and map together
+filtermap :: (a -> Maybe b) -> [a] -> [b]
 filtermap = mapfilter
+
+-- | filter and map together (monadic)
+filtermapM :: (Monad m) => (a -> m (Maybe b)) -> [a] -> m [b]
+filtermapM = mapfilterM
 
 -- | Ordered combinations of sub lists
 --   Should think of better name
