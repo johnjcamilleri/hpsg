@@ -58,12 +58,12 @@ allTrees' cat avm g depth =
         -- Get matching rules (recurses)
         f (ERule (Rule (clhs:crhs)) mavm) = do
           let
-            from :: Int = read (concat (map show (reverse (tail pth))) ++ show (newIndex avm))
+            from :: Int = newIndex avm -- read (concat (map show (reverse pth)))
             rs = M.fromList $ zip [1..100] [from..] -- TODO remove this hard limit
-            ravms = map (replaceIndices rs) (unMultiAVM mavm)
+            ravms = unMultiAVM $ mreIndex rs mavm
             lhs = head ravms
             rhs = map (setDict (avmDict par)) $ tail ravms
-            par = avm ⊔ lhs
+            par = lhs ⊔ avm
           kidss' :: [[DerivationTree]] <-
             if d >= depth-1
             then return   [ [Node c ravm []] | (c,ravm) <- zip crhs rhs ]
@@ -79,10 +79,10 @@ allTrees' cat avm g depth =
         -- Get matching terminals
         f (ERule (Terminal clhs tok) mavm) = do
           let
-            from :: Int = read (concat (map show (reverse (tail pth))) ++ show (newIndex avm))
+            from :: Int = newIndex avm -- read (concat (map show (reverse pth)))
             rs = M.fromList $ zip [1..100] [from..] -- TODO remove this hard limit
-            lhs:rhs:[] = map (replaceIndices rs) (unMultiAVM mavm)
-            par = avm ⊔ rhs
+            lhs:rhs:[] = unMultiAVM $ mreIndex rs mavm
+            par = rhs ⊔ avm
           if cat == clhs && avm ⊔? rhs
           then return $ Just [ Node clhs par [Leaf tok] ]
           else return $ Nothing
@@ -90,10 +90,12 @@ allTrees' cat avm g depth =
     -- Are all these kids compatible with parent?
     compatibleKids :: AVM -> [DerivationTree] -> Bool
     compatibleKids avm kids = fst $ foldl (\(t,b) (Node _ a _) -> (t && canMergeAVMDicts b a, mergeAVMDicts b a)) (True,avm) kids
+    -- compatibleKids avm kids = fst $ foldl (\(t,b) (Node _ a _) -> (t && b ⊔? a, b ⊔ a)) (True,avm) kids
 
     -- Merge these kids with parent (dictionaries)
     mergeKids :: AVM -> [DerivationTree] -> AVM
     mergeKids avm kids = foldl (\b (Node _ a _) -> mergeAVMDicts b a) avm kids
+    -- mergeKids avm kids = foldl (\b (Node _ a _) -> b ⊔ a) avm kids
 
     -- Clean dictionaries of kids
     cleanKids :: [DerivationTree] -> [DerivationTree]
@@ -147,8 +149,11 @@ test = do
       then
         putStrLn "Ok"
       else do
+        let under = gold L.\\ out
+            over  = out L.\\ gold
         putStrLn "Under:"
-        putStrLn $ unlines $ gold L.\\ out
+        putStrLn $ unlines $ under
         putStrLn "Over:"
-        putStrLn $ unlines $ out L.\\ gold
+        putStrLn $ unlines $ over
+        putStrLn $ show (length under) ++ "/" ++ show (length over) ++ "/" ++ show (length gold)
       putStrLn "------------------------"

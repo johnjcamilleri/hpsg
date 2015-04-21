@@ -78,28 +78,28 @@ ppTree = go 0
 
 g1 :: Grammar
 g1 = Grammar "s"
-     [ ERule (Rule ["s", "np", "vp"]) (mkMultiAVM [vnullAVM,numX,numX])
-     , ERule (Rule ["np", "d", "n"]) (mkMultiAVM [numX,numX,numX])
-     , ERule (Rule ["vp", "v"]) (mkMultiAVM [numX,numX])
-     , ERule (Rule ["vp", "v", "np"]) (mkMultiAVM [numX,numX,numY])
+     [ mkR ["s", "np", "vp"] [nullAVM,numX,numX]
+     , mkR ["np", "d", "n"] [numX,numX,numX]
+     , mkR ["vp", "v"] [numX,numX]
+     , mkR ["vp", "v", "np"] [numX,numX,numY]
 
      -- Terminals
-     , ERule (Terminal "n" "lamb") (mkMultiAVM [numX,numSG])
-     , ERule (Terminal "n" "lambs") (mkMultiAVM [numX,numPL])
-     , ERule (Terminal "n" "sheep") (mkMultiAVM [numX,numSG])
-     , ERule (Terminal "n" "sheep") (mkMultiAVM [numX,numPL])
+     , mkT "n" "lamb" numX numXsg
+     , mkT "n" "lambs" numX numXpl
+     , mkT "n" "sheep" numX numXsg
+     , mkT "n" "sheep" numX numXpl
 
-     , ERule (Terminal "v" "sleeps") (mkMultiAVM [numX,numSG])
-     , ERule (Terminal "v" "sleep") (mkMultiAVM [numX,numPL])
+     , mkT "v" "sleeps" numX numXsg
+     , mkT "v" "sleep" numX numXpl
 
-     , ERule (Terminal "d" "a") (mkMultiAVM [numX,numSG])
-     , ERule (Terminal "d" "two") (mkMultiAVM [numX,numPL])
+     , mkT "d" "a" numX numXsg
+     , mkT "d" "two" numX numXpl
      ]
   where
-    numX = vmkAVM1 "NUM" (ValIndex 1)
-    numY = vmkAVM1 "NUM" (ValIndex 2)
-    numSG = vmkAVM [("NUM",ValIndex 1)] `vaddDict` [(1,ValAtom "sg")]
-    numPL = vmkAVM [("NUM",ValIndex 1)] `vaddDict` [(1,ValAtom "pl")]
+    numX = mkAVM1 "NUM" (ValIndex 1)
+    numY = mkAVM1 "NUM" (ValIndex 2)
+    numXsg = mkAVM [("NUM",ValIndex 1)] `addDict` [(1,ValAtom "sg")]
+    numXpl = mkAVM [("NUM",ValIndex 1)] `addDict` [(1,ValAtom "pl")]
 
 -- Adds case
 g2 :: Grammar
@@ -128,15 +128,6 @@ g2 = Grammar "s"
      -- , mkT "d" "two" numX numXpl
      ]
   where
-
-    mkR :: [Cat] -> [AVM] -> ERule
-    mkR cats avms
-      | length cats /= length avms = error "mkR: unequal lengths"
-      | otherwise = ERule (Rule cats) (mkMultiAVM (map ValAVM avms))
-
-    mkT :: Cat -> Token -> AVM -> AVM -> ERule
-    mkT cat tok avm1 avm2 = ERule (Terminal cat tok) (mkMultiAVM [ValAVM avm1, ValAVM avm2])
-
     numX = mkAVM1 "NUM" (ValIndex 1)
     numY = mkAVM1 "NUM" (ValIndex 2)
     numXsg = numX `addDict` [(1,ValAtom "sg")]
@@ -146,3 +137,11 @@ g2 = Grammar "s"
     caseY = mkAVM1 "CASE" (ValIndex 2)
     caseYnom = caseY `addDict` [(2,ValAtom "nom")]
     caseYacc = caseY `addDict` [(2,ValAtom "acc")]
+
+mkR :: [Cat] -> [AVM] -> ERule
+mkR cats avms
+  | length cats /= length avms = error "mkR: unequal lengths"
+  | otherwise = ERule (Rule cats) (mkMultiAVM (map ValAVM avms))
+
+mkT :: Cat -> Token -> AVM -> AVM -> ERule
+mkT cat tok avm1 avm2 = ERule (Terminal cat tok) (mkMultiAVM [ValAVM avm1, ValAVM avm2])

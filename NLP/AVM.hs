@@ -67,6 +67,7 @@ instance Show MultiAVM where
   show = inlineMAVM
 
 -- | Convert Multi-AVM to single AVM
+--   Dictionary is copied into AVM
 --   Indexes start from 1
 --   Throws error if index is out of range
 toAVM :: MultiAVM -> Int -> AVM
@@ -292,8 +293,8 @@ setDict dict avm = AVM (avmBody avm) dict
 --       _ -> v
 
 -- | Rename/replace indices
-replaceIndices :: M.Map Index Index -> AVM -> AVM
-replaceIndices rs avm = AVM body' dict''
+reIndex :: M.Map Index Index -> AVM -> AVM
+reIndex rs avm = AVM body' dict''
   where
     dict' = M.mapKeys (\k1 -> case M.lookup k1 rs of Just k2 -> k2 ; Nothing -> k1) (avmDict avm)
     dict'' = M.map f dict'
@@ -301,7 +302,20 @@ replaceIndices rs avm = AVM body' dict''
     f :: Value -> Value
     f v = case v of
       ValIndex i -> ValIndex $ M.findWithDefault i i rs
-      ValAVM avm -> ValAVM $ replaceIndices rs avm
+      ValAVM avm -> ValAVM $ reIndex rs avm
+      _ -> v
+
+-- | Rename/replace indices in MultiAVM
+mreIndex :: M.Map Index Index -> MultiAVM -> MultiAVM
+mreIndex rs mavm = MultiAVM body' dict''
+  where
+    dict' = M.mapKeys (\k1 -> case M.lookup k1 rs of Just k2 -> k2 ; Nothing -> k1) (mavmDict mavm)
+    dict'' = M.map f dict'
+    body' = map f (mavmBody mavm)
+    f :: Value -> Value
+    f v = case v of
+      ValIndex i -> ValIndex $ M.findWithDefault i i rs
+      ValAVM avm -> ValAVM $ reIndex rs avm
       _ -> v
 
 -- -- | Given two AVMs, try to figure out which indices where renamed
@@ -427,12 +441,16 @@ vmkAVM = ValAVM . mkAVM
 -- mkAVMNamed name l = AVM (M.fromList ((Attr "SORT",ValAtom name):l)) M.empty
 
 -- | Make a multi-AVM
+--   Dictionaries from individual AVMs are merged into top
 mkMultiAVM :: [Value] -> MultiAVM
 mkMultiAVM vals | not $ all (\v -> isValAVM v || isValIndex v) vals = error $ "mkMultiAVM: invalid values: " ++ show vals
 mkMultiAVM vals = MultiAVM body dict
   where
-    avms = map (\(ValAVM avm) -> avm) (filter isValAVM vals)
-    body = vals
+    avms :: [AVM] = map (\(ValAVM avm) -> avm) (filter isValAVM vals)
+    body :: [Value] = map f vals
+    f v = case v of
+      ValAVM avm -> ValAVM (cleanDict avm)
+      _ -> v
     dict = foldl mergeDicts M.empty (map avmDict avms)
 -- mkMultiAVM :: [AVM] -> MultiAVM
 -- mkMultiAVM avms = MultiAVM body dict
@@ -508,7 +526,7 @@ ppMAVM mavm = CMW.execWriter f
   where
     f :: (CMW.MonadWriter String m) => m ()
     f = do
-      CMW.tell $ unlines $ map ppAVM (unMultiAVM mavm)
+      CMW.tell $ unlines $ map (ppAVM.cleanDict) (unMultiAVM mavm)
       ppDict (mavmDict mavm) False
 
 -- | Helper function for showing values, recursively
@@ -564,7 +582,7 @@ inlineMAVM mavm = CMW.execWriter f
   where
     f :: (CMW.MonadWriter String m) => m ()
     f = do
-      CMW.tell $ unlines $ map inlineAVM (unMultiAVM mavm)
+      CMW.tell $ unlines $ map (inlineAVM.cleanDict) (unMultiAVM mavm)
       ppDict (mavmDict mavm) False
 
 ------------------------------------------------------------------------------

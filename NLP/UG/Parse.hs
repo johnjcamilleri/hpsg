@@ -59,7 +59,7 @@ allTrees' avm g depth = go 0 avm
           where
             -- replace all indices in rule to avoid clashes
             rs = M.fromList $ zip [1..100] [newIndex avm..] -- TODO remove this hard limit
-            ravms = map (replaceIndices rs) (unMultiAVM mavm)
+            ravms = map (reIndex rs) (unMultiAVM mavm)
             lhs = head ravms
             rhs = map (setDict (avmDict par)) $ tail ravms
             par = lhs ⊔ avm -- new parent (want to keep indices as in LHS)
