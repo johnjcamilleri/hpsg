@@ -65,9 +65,9 @@ allTrees' cat avm g depth =
             rhs = map (setDict (avmDict par)) $ tail ravms
             par = lhs ⊔ avm
           kidss' :: [[DerivationTree]] <-
-            if d >= depth-1
-            then return   [ [Node c ravm []] | (c,ravm) <- zip crhs rhs ]
-            else sequence [ go (d+1) (i:pth) c ravm  | (i,(c,ravm)) <- zip [1..] (zip crhs rhs) ]
+            if d < depth-1
+            then sequence [ go (d+1) (i:pth) c ravm  | (i,(c,ravm)) <- zip [1..] (zip crhs rhs) ]
+            else return   [ [Node c ravm []] | (c,ravm) <- zip crhs rhs ]
           let kidss = combos kidss'
 
           if cat == clhs && avm ⊔? lhs

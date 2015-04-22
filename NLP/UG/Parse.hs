@@ -64,9 +64,9 @@ allTrees' avm g depth = go 0 avm
             rhs = map (setDict (avmDict par)) $ tail ravms
             par = lhs ⊔ avm -- new parent (want to keep indices as in LHS)
             kidss :: [[DerivationTree]] =
-              if d >= depth-1
-              then combos [ [Node ravm []] | ravm <- rhs ]
-              else combos [ go (d+1) ravm  | ravm <- rhs ]
+              if d < depth-1
+              then combos [ go (d+1) ravm  | ravm <- rhs ]
+              else combos [ [Node ravm []] | ravm <- rhs ]
 
         -- Get matching terminals
         f (Terminal tok lhs) =
