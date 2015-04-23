@@ -11,6 +11,9 @@ import Data.Either (partitionEithers)
 import Text.Printf (printf)
 import Debug.Trace (trace)
 
+import Text.Parsec
+import Text.Parsec.String
+
 import qualified Control.Monad.State as CMS
 import qualified Control.Monad.Writer as CMW
 import qualified Control.Monad.Except as CME
@@ -467,125 +470,6 @@ maddDict :: MultiAVM -> [(Index,Value)] -> MultiAVM
 maddDict mavm d = mavm { mavmDict = M.fromList d }
 
 ------------------------------------------------------------------------------
--- Pretty print
-
--- | Pretty-print AVM with line-breaks and indentation
-ppAVM :: AVM -> String
-ppAVM avm = CMW.execWriter f
-  where
-    putStr s   = CMW.tell s
-    putStrLn s = CMW.tell (s++"\n")
-
-    f :: (CMW.MonadWriter String m) => m ()
-    f = do
-      go 0 (avmBody avm)
-      CMW.tell "\n"
-      ppDict (avmDict avm) False
-
-    go :: (CMW.MonadWriter String m) => Int -> AVMap -> m ()
-    go l av | M.null av = putStr "[]"
-    go l av = do
-      putStr $ "["
-      mapM_ (uncurry $ f (l+1)) $ zip [0..] (M.toList av)
-      where
-        f :: (CMW.MonadWriter String m) => Int -> Int -> (Attribute,Value) -> m ()
-        f l' i (Attr a,v) = do
-          if i > 0
-          then putStr $ replicate l' ' '
-          else return ()
-          putStr $ a++" "
-          showValue v (\avm -> go (l'+(length a)+1) (avmBody avm))
-          if i+1 == M.size av
-          then putStr "]"
-          else putStrLn " "
-
--- | Pretty-print a dictionary, either inline or not
-ppDict :: (CMW.MonadWriter String m) => Dict -> Bool -> m ()
-ppDict dict _ | M.size dict == 0 = return ()
-ppDict dict inline = do
-  let
-    putStr s   = CMW.tell s
-    putStrLn s = CMW.tell (s++"\n")
-    dl = M.toList dict
-    f (i,(x,val)) =
-      if inline
-      then do
-        putStr $ show x ++ "="
-        showValue val (CMW.tell . inlineAVM)
-        if i < length dl then putStr ", " else return ()
-      else do
-        putStr $ " " ++ show x ++ ": "
-        showValue val (CMW.tell . inlineAVM)
-        if i < length dl then putStr "\n" else return ()
-  if inline then putStr " where " else putStrLn "where"
-  mapM_ f (zip [1..] dl)
-
--- | Pretty-print a MultiAVM
-ppMAVM :: MultiAVM -> String
-ppMAVM mavm = CMW.execWriter f
-  where
-    f :: (CMW.MonadWriter String m) => m ()
-    f = do
-      CMW.tell $ unlines $ map (ppAVM.cleanDict) (unMultiAVM mavm)
-      ppDict (mavmDict mavm) False
-
--- | Helper function for showing values, recursively
---   `f` is the function applied to nested AVMs
-showValue :: (CMW.MonadWriter String m) => Value -> (AVM -> m ()) -> m ()
-showValue v f | islist v =
-  do
-    let vs = tolist v
-    CMW.tell "<"
-    if L.null vs
-    then return ()
-    else do
-      showValue (head vs) f
-      mapM_ (\v -> CMW.tell "," >> showValue v f) (tail vs)
-    CMW.tell ">"
-showValue v f =
-  case v of
-    ValAVM avm ->
-      if M.size (avmDict avm) > 0
-      then error "Non-empty middle dictionary"
-      else f avm
-    ValAtom s  -> CMW.tell s
-    ValIndex i -> CMW.tell $ "#"++show i
-
--- | Pretty-print AVM in a single line
-inlineAVM :: AVM -> String
-inlineAVM avm = CMW.execWriter f
-  where
-    putStr s   = CMW.tell s
-
-    f :: (CMW.MonadWriter String m) => m ()
-    f = do
-      go (avmBody avm)
-      ppDict (avmDict avm) True
-
-    go :: (CMW.MonadWriter String m) => AVMap -> m ()
-    go av | M.null av = putStr "[]"
-    go av = do
-      putStr $ "["
-      mapM_ (uncurry $ f) $ zip [0..] (M.toList av)
-      where
-        f :: (CMW.MonadWriter String m) => Int -> (Attribute,Value) -> m ()
-        f i (Attr a,v) = do
-          putStr $ a++" "
-          showValue v (\avm -> go (avmBody avm))
-          if i+1 == M.size av
-          then putStr "]"
-          else putStr ","
-
--- | Inline a MultiAVM (one per line)
-inlineMAVM :: MultiAVM -> String
-inlineMAVM mavm = CMW.execWriter f
-  where
-    f :: (CMW.MonadWriter String m) => m ()
-    f = do
-      CMW.tell $ unlines $ map (inlineAVM.cleanDict) (unMultiAVM mavm)
-      ppDict (mavmDict mavm) False
-
-------------------------------------------------------------------------------
 -- Identity
 
 -- | Type Identity: checks values are same (including variables)
@@ -836,3 +720,190 @@ intersectionWithKeyM f mapA mapB =
 mapWithKeyM :: (Monad m, Ord k) => (k -> a -> m a) -> M.Map k a -> m (M.Map k a)
 mapWithKeyM f mapA =
   Tr.sequence $ M.mapWithKey (\k a -> do {x <- a; f k x}) (M.map return mapA)
+
+------------------------------------------------------------------------------
+-- Pretty printing
+
+-- | Pretty-print AVM with line-breaks and indentation
+ppAVM :: AVM -> String
+ppAVM avm = CMW.execWriter f
+  where
+    putStr s   = CMW.tell s
+    putStrLn s = CMW.tell (s++"\n")
+
+    f :: (CMW.MonadWriter String m) => m ()
+    f = do
+      go 0 (avmBody avm)
+      CMW.tell "\n"
+      ppDict (avmDict avm) False
+
+    go :: (CMW.MonadWriter String m) => Int -> AVMap -> m ()
+    go l av | M.null av = putStr "[]"
+    go l av = do
+      putStr $ "["
+      mapM_ (uncurry $ f (l+1)) $ zip [0..] (M.toList av)
+      where
+        f :: (CMW.MonadWriter String m) => Int -> Int -> (Attribute,Value) -> m ()
+        f l' i (Attr a,v) = do
+          if i > 0
+          then putStr $ replicate l' ' '
+          else return ()
+          putStr $ a++" "
+          showValue v (\avm -> go (l'+(length a)+1) (avmBody avm))
+          if i+1 == M.size av
+          then putStr "]"
+          else putStrLn " "
+
+-- | Pretty-print a dictionary, either inline or not
+ppDict :: (CMW.MonadWriter String m) => Dict -> Bool -> m ()
+ppDict dict _ | M.size dict == 0 = return ()
+ppDict dict inline = do
+  let
+    putStr s   = CMW.tell s
+    putStrLn s = CMW.tell (s++"\n")
+    dl = M.toList dict
+    f (i,(x,val)) =
+      if inline
+      then do
+        putStr $ show x ++ "="
+        showValue val (CMW.tell . inlineAVM)
+        if i < length dl then putStr ", " else return ()
+      else do
+        putStr $ " " ++ show x ++ ": "
+        showValue val (CMW.tell . inlineAVM)
+        if i < length dl then putStr "\n" else return ()
+  if inline then putStr " where " else putStrLn "where"
+  mapM_ f (zip [1..] dl)
+
+-- | Pretty-print a MultiAVM
+ppMAVM :: MultiAVM -> String
+ppMAVM mavm = CMW.execWriter f
+  where
+    f :: (CMW.MonadWriter String m) => m ()
+    f = do
+      CMW.tell $ unlines $ map (ppAVM.cleanDict) (unMultiAVM mavm)
+      ppDict (mavmDict mavm) False
+
+-- | Pretty-print AVM in a single line
+inlineAVM :: AVM -> String
+inlineAVM avm = CMW.execWriter f
+  where
+    putStr s   = CMW.tell s
+
+    f :: (CMW.MonadWriter String m) => m ()
+    f = do
+      go (avmBody avm)
+      ppDict (avmDict avm) True
+
+    go :: (CMW.MonadWriter String m) => AVMap -> m ()
+    go av | M.null av = putStr "[]"
+    go av = do
+      putStr $ "["
+      mapM_ (uncurry $ f) $ zip [0..] (M.toList av)
+      where
+        f :: (CMW.MonadWriter String m) => Int -> (Attribute,Value) -> m ()
+        f i (Attr a,v) = do
+          putStr $ a++" "
+          showValue v (\avm -> go (avmBody avm))
+          if i+1 == M.size av
+          then putStr "]"
+          else putStr ","
+
+-- | Inline a MultiAVM (one per line)
+inlineMAVM :: MultiAVM -> String
+inlineMAVM mavm = CMW.execWriter f
+  where
+    f :: (CMW.MonadWriter String m) => m ()
+    f = do
+      CMW.tell $ unlines $ map (inlineAVM.cleanDict) (unMultiAVM mavm)
+      ppDict (mavmDict mavm) False
+
+-- | Helper function for showing values, recursively
+--   `f` is the function applied to nested AVMs
+showValue :: (CMW.MonadWriter String m) => Value -> (AVM -> m ()) -> m ()
+showValue v f | islist v =
+  do
+    let vs = tolist v
+    CMW.tell "<"
+    if L.null vs
+    then return ()
+    else do
+      showValue (head vs) f
+      mapM_ (\v -> CMW.tell "," >> showValue v f) (tail vs)
+    CMW.tell ">"
+showValue v f =
+  case v of
+    ValAVM avm ->
+      if M.size (avmDict avm) > 0
+      then error "Non-empty middle dictionary"
+      else f avm
+    ValAtom s  -> CMW.tell s
+    ValIndex i -> CMW.tell $ "#"++show i
+
+------------------------------------------------------------------------------
+-- Parser (inline AVMs only)
+
+-- | Parse a pretty-printed AVM
+parseAVM :: String -> Either ParseError AVM
+parseAVM input = parse pAVM "" input
+
+-- | Parse a pretty-printed AVM
+--   Will throw an error if parsing fails
+parseAVM' :: String -> AVM
+parseAVM' s =
+  case parseAVM s of
+    Left  err -> error $ "parseAVM:\n"++s++"\n"++show err
+    Right avm -> avm
+
+pAVM :: Parser AVM
+pAVM = do
+  char '['
+  let av = do
+        att <- many letter
+        many1 space
+        val <- pValue
+        return (att,val)
+  avs <- av `sepBy1` (char ',')
+  char ']'
+  md <- optionMaybe pDict
+  return $ case md of
+    Just d ->  mkAVM avs `addDict` d
+    Nothing -> mkAVM avs
+
+pDict :: Parser [(Index,Value)]
+pDict =  do
+  space
+  string "where"
+  space
+  d `sepBy1` (string ", ")
+  where
+    d = do
+      i <- pInt
+      char '='
+      v <- pValue
+      return (i,v)
+
+pValue :: Parser Value
+pValue = try vavm <|> try vatom <|> try vindex
+  where
+    vavm = do
+      val <- pAVM
+      return $ ValAVM val
+    vatom = do
+      val <- many1 alphaNum
+      return $ ValAtom val
+    vindex = do
+      char '#'
+      val <- pInt
+      return $ ValIndex val
+
+pInt :: Parser Int
+pInt = many1 digit >>= return . read
+
+------------------------------------------------------------------------------
+-- Just Testing
+
+-- main :: IO ()
+-- main = do
+--   let test = "[AH 1,b [A 8]] where 8=#6, 7=[A hello]"
+--   parseTest pAVM test
