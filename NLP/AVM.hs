@@ -495,19 +495,44 @@ infix 4 ~= -- same as ==
 eq :: AVM -> AVM -> Bool
 eq a b | (M.keys (avmBody a)) /= (M.keys (avmBody b)) = False
 eq a b =
-  all (\k -> M.member k b2 && eqV (b1 M.! k) (b2 M.! k)) (M.keys b1)
+  all (\k -> {-M.member k b2 &&-} eqV (b1 M.! k) (b2 M.! k)) (M.keys b1)
   where
     (b1,d1) = (avmBody a, avmDict a)
     (b2,d2) = (avmBody b, avmDict b)
 
     eqV :: Value -> Value -> Bool
+    eqV (ValIndex i1) (ValIndex i2) | i1 == i2 = True
+    eqV (ValIndex i1) (ValIndex i2) | not (M.member i1 d1) && not (M.member i2 d2) = True -- ignore actual indices when unbound
+
     eqV (ValIndex i1) v2 | M.member i1 d1 = eqV (d1 M.! i1) v2
     eqV v1 (ValIndex i2) | M.member i2 d2 = eqV v1 (d2 M.! i2)
-    eqV (ValIndex i1) (ValIndex i2) | not (M.member i1 d1) && not (M.member i2 d2) = True -- ignore actual indices when unbound
 
     eqV (ValAVM avm1) (ValAVM avm2) = (setDict d1 avm1) ~= (setDict d2 avm2)
 
     eqV v1 v2 = v1 == v2
+
+-- -- | Equality that follows reentrants
+-- --   This version attempts to handle cyclic AVMs
+-- eqCy :: AVM -> AVM -> Bool
+-- eqCy a b | (M.keys (avmBody a)) /= (M.keys (avmBody b)) = False
+-- eqCy a b =
+--   all (\k -> {-M.member k b2 &&-} eqV [] (b1 M.! k) (b2 M.! k)) (M.keys b1)
+--   where
+--     (b1,d1) = (avmBody a, avmDict a)
+--     (b2,d2) = (avmBody b, avmDict b)
+
+--     eqV :: [Index] -> Value -> Value -> Bool
+
+--     eqV acc (ValIndex i1) v2 | i1 `elem` acc = eqV acc (d1 M.! i1) v2
+--     eqV acc v1 (ValIndex i2) | i2 `elem` acc = eqV acc v1 (d2 M.! i2)
+
+--     eqV acc (ValIndex i1) v2 | M.member i1 d1 = eqV acc (d1 M.! i1) v2
+--     eqV acc v1 (ValIndex i2) | M.member i2 d2 = eqV acc v1 (d2 M.! i2)
+--     eqV acc (ValIndex i1) (ValIndex i2) | not (M.member i1 d1) && not (M.member i2 d2) = True -- ignore actual indices when unbound
+
+--     eqV acc (ValAVM avm1) (ValAVM avm2) = (setDict d1 avm1) ~= (setDict d2 avm2)
+
+--     eqV acc v1 v2 = v1 == v2
 
 ------------------------------------------------------------------------------
 -- Unification

@@ -137,16 +137,14 @@ pp s avm = do
 --   assert $ b ⊑ a
 --   assert $ a ~= b
 
--- cx_implies_unifiable = do
---   let a = mkAVM [("A",ValIndex 3),("C",ValIndex 3)]
---   let b = mkAVM [("A",ValAtom "y"),("C",ValAtom "x")]
-
---   -- a ⊑ b ==> a ⊔? b
---   pp "a" a
---   pp "b" b
---   -- putStrLn $ inlineAVM $ a ⊔ b
---   assert $ a ⊑ b
---   assert $ a ⊔? b
+cx_implies_unifiable = do
+  let a = parseAVM' "[B #5]"
+  let b = parseAVM' "[A [A #5],B x] where 5=[A z]"
+  -- a ⊑ b ==> a ⊔? b
+  pp "a" a
+  pp "b" b
+  assert $ a ⊑ b
+  assert $ a ⊔? b
 
 -- cx_idempotency = do
 --   let a = mkAVM' [("B",ValIndex 2)] [(2,ValAtom "z")]
@@ -155,11 +153,11 @@ pp s avm = do
 --   assert $ a ~= a ⊔ a
 
 -- cx_commutativity = do
---   let a = mkAVM [("B",ValIndex 3)] `addDict` [(3,ValAtom "y")]
---   let b = mkAVM [("B",ValIndex 2),("C",ValIndex 2)] `addDict` [(2,vnullAVM)]
+--   let a = parseAVM' "[A [A #4,B #3,C []],B [B x,C #5],C [A #4]] where 5=y"
+--   let b = parseAVM' "[A #3,C [B [A [],C y],C x]] where 3=[A y,C #2]"
 --   pp "a" a
 --   pp "b" b
---   pp "b reindexed" (replaceIndices (M.fromList $ zip [1..100] [newIndex a..]) b)
+--   pp "b reindexed" (reIndex (M.fromList $ zip [1..100] [newIndex a..]) b)
 --   pp "a ⊔ b" $ a ⊔ b
 --   pp "b ⊔ a" $ b ⊔ a
 --   assert $ a ⊔ b ~= b ⊔ a
