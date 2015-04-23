@@ -863,7 +863,7 @@ pAVM = do
         many1 space
         val <- pValue
         return (att,val)
-  avs <- av `sepBy1` (char ',')
+  avs <- av `sepBy` (char ',')
   char ']'
   md <- optionMaybe pDict
   return $ case md of
