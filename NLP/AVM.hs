@@ -491,48 +491,49 @@ infix 4 ≐ -- same as ==
 (~=) = eq
 infix 4 ~= -- same as ==
 
--- | Equality that follows reentrants
-eq :: AVM -> AVM -> Bool
-eq a b | (M.keys (avmBody a)) /= (M.keys (avmBody b)) = False
-eq a b =
-  all (\k -> {-M.member k b2 &&-} eqV (b1 M.! k) (b2 M.! k)) (M.keys b1)
-  where
-    (b1,d1) = (avmBody a, avmDict a)
-    (b2,d2) = (avmBody b, avmDict b)
-
-    eqV :: Value -> Value -> Bool
-    eqV (ValIndex i1) (ValIndex i2) | i1 == i2 = True
-    eqV (ValIndex i1) (ValIndex i2) | not (M.member i1 d1) && not (M.member i2 d2) = True -- ignore actual indices when unbound
-
-    eqV (ValIndex i1) v2 | M.member i1 d1 = eqV (d1 M.! i1) v2
-    eqV v1 (ValIndex i2) | M.member i2 d2 = eqV v1 (d2 M.! i2)
-
-    eqV (ValAVM avm1) (ValAVM avm2) = (setDict d1 avm1) ~= (setDict d2 avm2)
-
-    eqV v1 v2 = v1 == v2
-
 -- -- | Equality that follows reentrants
--- --   This version attempts to handle cyclic AVMs
--- eqCy :: AVM -> AVM -> Bool
--- eqCy a b | (M.keys (avmBody a)) /= (M.keys (avmBody b)) = False
--- eqCy a b =
---   all (\k -> {-M.member k b2 &&-} eqV [] (b1 M.! k) (b2 M.! k)) (M.keys b1)
+-- eq :: AVM -> AVM -> Bool
+-- eq a b | (M.keys (avmBody a)) /= (M.keys (avmBody b)) = False
+-- eq a b =
+--   all (\k -> {-M.member k b2 &&-} eqV (b1 M.! k) (b2 M.! k)) (M.keys b1)
 --   where
 --     (b1,d1) = (avmBody a, avmDict a)
 --     (b2,d2) = (avmBody b, avmDict b)
 
---     eqV :: [Index] -> Value -> Value -> Bool
+--     eqV :: Value -> Value -> Bool
+--     eqV (ValIndex i1) (ValIndex i2) | not (M.member i1 d1) && not (M.member i2 d2) = True -- ignore actual indices when unbound
 
---     eqV acc (ValIndex i1) v2 | i1 `elem` acc = eqV acc (d1 M.! i1) v2
---     eqV acc v1 (ValIndex i2) | i2 `elem` acc = eqV acc v1 (d2 M.! i2)
+--     eqV (ValIndex i1) v2 | M.member i1 d1 = eqV (d1 M.! i1) v2
+--     eqV v1 (ValIndex i2) | M.member i2 d2 = eqV v1 (d2 M.! i2)
 
---     eqV acc (ValIndex i1) v2 | M.member i1 d1 = eqV acc (d1 M.! i1) v2
---     eqV acc v1 (ValIndex i2) | M.member i2 d2 = eqV acc v1 (d2 M.! i2)
---     eqV acc (ValIndex i1) (ValIndex i2) | not (M.member i1 d1) && not (M.member i2 d2) = True -- ignore actual indices when unbound
+--     eqV (ValAVM avm1) (ValAVM avm2) = (setDict d1 avm1) ~= (setDict d2 avm2)
 
---     eqV acc (ValAVM avm1) (ValAVM avm2) = (setDict d1 avm1) ~= (setDict d2 avm2)
+--     eqV v1 v2 = v1 == v2
 
---     eqV acc v1 v2 = v1 == v2
+-- | Equality that follows reentrants
+--   This version attempts to handle cyclic AVMs
+eq :: AVM -> AVM -> Bool
+eq = eqCy ([],[])
+eqCy :: ([Index],[Index]) -> AVM -> AVM -> Bool
+eqCy _   a b | (M.keys (avmBody a)) /= (M.keys (avmBody b)) = False
+eqCy acs a b =
+  all (\k -> {-M.member k b2 &&-} eqV acs (b1 M.! k) (b2 M.! k)) (M.keys b1)
+  where
+    (b1,d1) = (avmBody a, avmDict a)
+    (b2,d2) = (avmBody b, avmDict b)
+
+    eqV :: ([Index],[Index]) -> Value -> Value -> Bool
+
+    -- We've already looked up this index before, prevent recursion
+    eqV (ac1,ac2) (ValIndex i1) (ValIndex i2) | i1 `elem` ac1 && i2 `elem` ac2 = True
+
+    eqV (ac1,ac2) (ValIndex i1) v2 | M.member i1 d1 = eqV (i1:ac1,ac2) (d1 M.! i1) v2
+    eqV (ac1,ac2) v1 (ValIndex i2) | M.member i2 d2 = eqV (ac1,i2:ac2) v1 (d2 M.! i2)
+    eqV (ac1,ac2) (ValIndex i1) (ValIndex i2) | not (M.member i1 d1) && not (M.member i2 d2) = True -- ignore actual indices when unbound
+
+    eqV acs (ValAVM avm1) (ValAVM avm2) = eqCy acs (setDict d1 avm1) (setDict d2 avm2)
+
+    eqV acs v1 v2 = v1 == v2
 
 ------------------------------------------------------------------------------
 -- Unification

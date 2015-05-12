@@ -137,6 +137,12 @@ pp s avm = do
 --   assert $ b ⊑ a
 --   assert $ a ~= b
 
+-- This will hang...
+cx_equality = do
+  let a = parseAVM' "[A #1] where 1=[X #3], 3=[Z #1]"
+  let b = parseAVM' "[A #8] where 8=[X #6], 6=[Z #8]"
+  assert $ a `eq` b
+
 cx_implies_unifiable = do
   let a = parseAVM' "[B #5]"
   let b = parseAVM' "[A [A #5],B x] where 5=[A z]"
