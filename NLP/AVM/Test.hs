@@ -93,27 +93,27 @@ props = do
   let args = stdArgs
         { maxSize = 10          -- default = 100
         , chatty = True         -- default = True
-        , maxSuccess = 100      -- default = 100
+        , maxSuccess = 1000     -- default = 100
         , maxDiscardRatio = 100 -- default = 10
         }
 
   -- putStrLn "[ Equality ]"
   -- putStrLn "Commutativity" >> quickCheckWith args prop_equality_commutative -- ok
   -- putStrLn ""
-  putStrLn "[ Subsumption ]"
-  putStrLn "Least element" >> quickCheckWith args prop_subsumption_least -- ok
-  putStrLn "Reflexivity" >> quickCheckWith args prop_subsumption_reflexive -- ok
-  putStrLn "Transitivity" >> quickCheckWith args prop_subsumption_transitive -- ok
-  putStrLn "Anti-symmetry" >> quickCheckWith args prop_subsumption_antisymmetric -- ok
-  putStrLn "Implies unifiable" >> quickCheckWith args prop_subsumes_implies_unifiable -- ok
-  putStrLn ""
+  -- putStrLn "[ Subsumption ]"
+  -- putStrLn "Least element" >> quickCheckWith args prop_subsumption_least -- ok
+  -- putStrLn "Reflexivity" >> quickCheckWith args prop_subsumption_reflexive -- ok
+  -- putStrLn "Transitivity" >> quickCheckWith args prop_subsumption_transitive -- ok
+  -- putStrLn "Anti-symmetry" >> quickCheckWith args prop_subsumption_antisymmetric -- ok
+  -- putStrLn "Implies unifiable" >> quickCheckWith args prop_subsumes_implies_unifiable -- ok
+  -- putStrLn ""
   putStrLn "[ Unification ]"
   putStrLn "Idempotency" >> quickCheckWith args prop_unification_idempotent -- ok
-  putStrLn "Commutativity" >> quickCheckWith args prop_unification_commutative -- ok
-  putStrLn "Associativity" >> quickCheckWith args prop_unification_associative -- ok
-  putStrLn "Absorption" >> quickCheckWith args prop_unification_absorbing -- not ok
-  putStrLn "Monotinicity" >> quickCheckWith args prop_unification_monotonic -- not ok
-  putStrLn "Most general" >> quickCheckWith args prop_unification_most_general -- not ok
+  putStrLn "Commutativity" >> quickCheckWith args prop_unification_commutative --
+  putStrLn "Associativity" >> quickCheckWith args prop_unification_associative --
+  putStrLn "Absorption" >> quickCheckWith args prop_unification_absorbing -- ok
+  putStrLn "Monotinicity" >> quickCheckWith args prop_unification_monotonic --
+  putStrLn "Most general" >> quickCheckWith args prop_unification_most_general --
   putStrLn ""
   -- putStrLn "[ Generalisation ]"
   -- putStrLn "Idempotency" >> quickCheckWith args prop_generalisation_idempotent -- ok
@@ -144,8 +144,8 @@ cx_equality = do
   assert $ a `eq` b
 
 cx_implies_unifiable = do
-  let a = parseAVM' "[B #5]"
-  let b = parseAVM' "[A [A #5],B x] where 5=[A z]"
+  let a = parseAVM' "[B #3,C #3]"
+  let b = parseAVM' "[B z,C x]"
   -- a ⊑ b ==> a ⊔? b
   pp "a" a
   pp "b" b
@@ -158,15 +158,15 @@ cx_implies_unifiable = do
 --   pp "a ⊔ a" $ a ⊔ a
 --   assert $ a ~= a ⊔ a
 
--- cx_commutativity = do
---   let a = parseAVM' "[A [A #4,B #3,C []],B [B x,C #5],C [A #4]] where 5=y"
---   let b = parseAVM' "[A #3,C [B [A [],C y],C x]] where 3=[A y,C #2]"
---   pp "a" a
---   pp "b" b
---   pp "b reindexed" (reIndex (M.fromList $ zip [1..100] [newIndex a..]) b)
---   pp "a ⊔ b" $ a ⊔ b
---   pp "b ⊔ a" $ b ⊔ a
---   assert $ a ⊔ b ~= b ⊔ a
+cx_commutativity = do
+  let a = parseAVM' "[A #1,C #1] where 1=[]"
+  let b = parseAVM' "[C #4] where 4=[C []]"
+  pp "a" a
+  pp "b" b
+  -- pp "b reindexed" (reIndex (M.fromList $ zip [1..100] [newIndex a..]) b)
+  pp "a ⊔ b" $ a ⊔ b
+  pp "b ⊔ a" $ b ⊔ a
+  assert $ a ⊔ b ~= b ⊔ a
 
 cx_associative = do
   -- a ⊔ (b ⊔ c) ~= (a ⊔ b) ⊔ c

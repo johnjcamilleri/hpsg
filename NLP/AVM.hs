@@ -37,6 +37,10 @@ isValAVM   v = case v of ValAVM _ -> True ; _ -> False
 isValAtom  v = case v of ValAtom _ -> True ; _ -> False
 isValIndex v = case v of ValIndex _ -> True ; _ -> False
 
+unValAVM (ValAVM avm) = avm
+unValAtom (ValAtom atom) = atom
+unValIndex (ValIndex i) = i
+
 type Path = [Attribute]
 
 -- | Used for structure sharing
@@ -185,10 +189,11 @@ isIndex v = case v of
 
 -- | Get indices in the AVM
 getIndices :: AVM -> [Index]
-getIndices avm = L.nub $ fb ++ fd
+getIndices avm = L.nub $ fb ++ fdk ++ fdv
   where
     fb = concatMap g (M.elems (avmBody avm))
-    fd = concatMap g (M.elems (avmDict avm))
+    fdk = M.keys (avmDict avm)
+    fdv = concatMap g (M.elems (avmDict avm))
 
     g :: Value -> [Index]
     g v = case v of
@@ -295,7 +300,7 @@ setDict dict avm = AVM (avmBody avm) dict
 --       ValIndex i -> ValIndex $ rs M.! i
 --       _ -> v
 
--- | Rename/replace indices
+-- | Rename/replace indices (in both body and dict)
 reIndex :: M.Map Index Index -> AVM -> AVM
 reIndex rs avm = AVM body' dict''
   where
@@ -560,18 +565,27 @@ unify a1 a2 = do
   -- then CME.throwError "I don't want to unify AVMs with intersecting indices"
   -- else return nullAVM -- dummy line
 
+  let
+    rs = M.fromList $ zip (getIndices a2) [newIndex a1..] -- index replacements for AVM2
+    AVM b1 d1 = a1
+    AVM b2 d2 = reIndex rs a2
+
+  -- trace (inlineAVM a1) $ return ()
+  -- trace (inlineAVM $ AVM b2 d2) $ return ()
+
   dict <- mergeDictsM d1 d2
-  (body, dict2) <- CMS.runStateT (unionWithM f b1 b2) dict
-  return $ AVM body dict2
+  (body, dict') <- CMS.runStateT (unionWithM f b1 b2) dict
+
+  -- Cleanup: pointers to pointers
+  let
+    rs = M.map unValIndex $ M.filter isValIndex dict' :: M.Map Index Index
+    avm' = reIndex rs (AVM body (M.filter (not.isValIndex) dict'))
 
   -- TODO: cleanup: unreferred-to things in dict
-  -- TODO: cleanup: pointers to pointers
+
+  return $ avm'
 
   where
-    -- a2' = replaceIndices (M.fromList $ zip (getIndices a2) [newIndex a1..]) a2
-    AVM b1 d1 = a1
-    AVM b2 d2 = a2 --a2'
-
     f :: (CME.MonadError String m, CMS.MonadState Dict m) => Value -> Value -> m Value
 
     -- Consider indices first
@@ -591,7 +605,7 @@ unify a1 a2 = do
           -- CMS.modify (M.insert i1 (ValIndex i2))
           return $ ValIndex i2
         (Nothing,Nothing) -> do
-          -- CMS.modify (M.insert i2 (ValIndex i1))
+          CMS.modify (M.insert i1 (ValIndex i2))
           return $ ValIndex i1
     f (ValIndex i1) v2 = do
       mv1 <- CMS.gets (lookupDict i1)
@@ -683,7 +697,7 @@ subsumes a b =
       in subsumes avm1' avm2'
 
     -- This must match with treatment of nulls in unification
-    subV (ValAVM avm) v2 | isnull avm = True -- converse not true
+    -- subV (ValAVM avm) v2 | isnull avm = True -- converse not true
 
     subV v1 v2 = v1 == v2
 
